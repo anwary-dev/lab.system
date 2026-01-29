@@ -1705,7 +1705,7 @@
 
     <script>
     
-   // ==================== Global Variables ====================
+  // ==================== Global Variables ====================
     let patients = [];
     let examinations = [];
     let settings = {};
@@ -1718,20 +1718,14 @@
     let incomeChart = null;
     let currentOperation = null;
     
-    // ==================== GitHub Cloud Storage Configuration ====================
-    const GITHUB_CONFIG = {
+    // ==================== Simple Cloud Storage ====================
+    // استفاده از یک Gist ID ثابت که در کد سخت‌کد شده
+    const CLOUD_CONFIG = {
         token: localStorage.getItem('github_token') || '',
-        username: localStorage.getItem('github_username') || 'anwary-dev'
+        username: localStorage.getItem('github_username') || '',
+        // این Gist ID ثابت برای همه دستگاه‌ها یکسان است
+        mainGistId: 'lab_system_cloud_data'
     };
-
-    let syncStatus = {
-        lastSync: localStorage.getItem('last_sync_time') || null,
-        isSyncing: false,
-        lastError: null
-    };
-
-    // Gist ID مرکزی که بین دستگاه‌ها به اشتراک گذاشته می‌شود
-    const MAIN_GIST_ID = 'lab_management_system_main';
 
     // ==================== Login System ====================
     function initLoginSystem() {
@@ -2092,12 +2086,6 @@
         localStorage.removeItem('lab_settings');
         localStorage.removeItem('lab_login_history');
         
-        // حذف از GitHub gists
-        localStorage.removeItem('github_gist_patients');
-        localStorage.removeItem('github_gist_examinations');
-        localStorage.removeItem('github_gist_settings');
-        localStorage.removeItem('github_gist_login_history');
-        
         // ثبت در تاریخچه
         const currentUser = localStorage.getItem('lab_current_user');
         const deleteEntry = {
@@ -2202,14 +2190,11 @@
         document.getElementById('language').value = settings.language || 'fa';
         
         // بارگذاری تنظیمات GitHub
-        document.getElementById('githubToken').value = GITHUB_CONFIG.token || '';
-        document.getElementById('githubUsername').value = GITHUB_CONFIG.username || 'anwary-dev';
-        
-        // به‌روزرسانی وضعیت همگام‌سازی
-        updateGitHubStatusDisplay();
+        document.getElementById('githubToken').value = CLOUD_CONFIG.token || '';
+        document.getElementById('githubUsername').value = CLOUD_CONFIG.username || '';
     }
 
-    // ==================== GitHub Cloud Storage Functions ====================
+    // ==================== SIMPLE CLOUD STORAGE - FIXED ====================
     async function testGitHubConnection() {
         const token = document.getElementById('githubToken').value.trim();
         const username = document.getElementById('githubUsername').value.trim();
@@ -2240,8 +2225,8 @@
                 const userData = await response.json();
                 
                 // ذخیره تنظیمات
-                GITHUB_CONFIG.token = token;
-                GITHUB_CONFIG.username = username;
+                CLOUD_CONFIG.token = token;
+                CLOUD_CONFIG.username = username;
                 localStorage.setItem('github_token', token);
                 localStorage.setItem('github_username', username);
                 
@@ -2255,9 +2240,6 @@
                 `;
                 
                 showAlert('success', 'اتصال به GitHub با موفقیت برقرار شد');
-                updateGitHubStatusDisplay();
-                updateSyncStatus('success', 'اتصال موفق');
-                
                 return true;
             } else {
                 const error = await response.json();
@@ -2275,8 +2257,6 @@
             `;
             
             showAlert('error', 'خطا در اتصال به GitHub');
-            updateGitHubStatusDisplay();
-            
             return false;
         }
     }
@@ -2291,8 +2271,8 @@
         }
         
         // ذخیره تنظیمات
-        GITHUB_CONFIG.token = token;
-        GITHUB_CONFIG.username = username;
+        CLOUD_CONFIG.token = token;
+        CLOUD_CONFIG.username = username;
         localStorage.setItem('github_token', token);
         localStorage.setItem('github_username', username);
         
@@ -2301,166 +2281,137 @@
         
         if (connected) {
             showAlert('success', 'تنظیمات GitHub با موفقیت ذخیره شد');
-            // پس از تست موفق، همگام‌سازی اولیه را انجام بده
-            setTimeout(() => {
-                syncAllWithGitHub();
-            }, 1000);
         }
     }
 
-    // ==================== NEW: Unified GitHub Storage System ====================
-    async function saveAllDataToGitHub() {
-        if (!GITHUB_CONFIG.token) {
-            console.log('❌ توکن GitHub تنظیم نشده است');
+    async function saveAllDataToCloud() {
+        if (!CLOUD_CONFIG.token) {
             showAlert('error', 'لطفاً ابتدا توکن GitHub را تنظیم کنید');
-            return { success: false, error: 'توکن تنظیم نشده' };
+            return false;
         }
         
         if (!navigator.onLine) {
-            console.log('📴 دستگاه آفلاین است');
             showAlert('warning', 'اتصال اینترنت برقرار نیست');
-            return { success: false, error: 'آفلاین' };
+            return false;
         }
         
-        updateSyncStatus('syncing', 'در حال ذخیره همه داده‌ها در ابر...');
+        console.log('☁️ شروع ذخیره‌سازی در ابر...');
         showLoading();
         
         try {
-            // جمع‌آوری همه داده‌ها در یک آبجکت
+            // جمع‌آوری همه داده‌ها
             const allData = {
                 patients: patients,
                 examinations: examinations,
                 settings: settings,
                 users: Object.values(users),
                 loginHistory: loginHistory,
-                syncInfo: {
-                    lastSync: new Date().toISOString(),
-                    device: navigator.userAgent,
-                    version: '1.0'
-                }
+                timestamp: new Date().toISOString(),
+                device: navigator.userAgent.substring(0, 50)
             };
             
             const content = JSON.stringify(allData, null, 2);
-            const description = `Lab Management System - Full Backup - ${new Date().toLocaleString('fa-IR')}`;
-            
-            // شناسه Gist ثابت برای همه دستگاه‌ها
-            const gistId = MAIN_GIST_ID;
+            const description = `Lab System Backup - ${new Date().toLocaleString('fa-IR')}`;
             
             const gistData = {
                 description: description,
                 public: false,
                 files: {
-                    'lab_management_data.json': {
+                    'lab_system_backup.json': {
                         content: content
                     }
                 }
             };
             
-            let response;
+            // شناسه Gist ثابت - همه از این استفاده می‌کنند
+            const gistId = CLOUD_CONFIG.mainGistId;
+            
             const headers = {
-                'Authorization': `token ${GITHUB_CONFIG.token}`,
+                'Authorization': `token ${CLOUD_CONFIG.token}`,
                 'Content-Type': 'application/json',
                 'Accept': 'application/vnd.github.v3+json'
             };
             
-            // همیشه از یک Gist ثابت استفاده می‌کنیم
-            const url = `https://api.github.com/gists/${gistId}`;
+            let response;
             
-            console.log('📤 ذخیره همه داده‌ها در GitHub Gist...');
-            response = await fetch(url, {
+            // ابتدا سعی می‌کنیم Gist را آپدیت کنیم
+            response = await fetch(`https://api.github.com/gists/${gistId}`, {
                 method: 'PATCH',
                 headers: headers,
                 body: JSON.stringify(gistData)
             });
             
+            // اگر Gist وجود نداشت (خطای 404)، یک Gist جدید ایجاد می‌کنیم
+            if (!response.ok && response.status === 404) {
+                console.log('📝 Gist وجود ندارد، در حال ایجاد Gist جدید...');
+                response = await fetch('https://api.github.com/gists', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(gistData)
+                });
+            }
+            
             if (!response.ok) {
-                // اگر Gist وجود نداشته باشد، یک Gist جدید ایجاد می‌کنیم
-                if (response.status === 404) {
-                    console.log('ℹ️ Gist وجود ندارد، در حال ایجاد Gist جدید...');
-                    response = await fetch('https://api.github.com/gists', {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify(gistData)
-                    });
-                }
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || `خطای ${response.status}`);
-                }
+                const error = await response.json();
+                throw new Error(`خطای GitHub: ${error.message || response.status}`);
             }
             
             const result = await response.json();
+            console.log('✅ داده‌ها با موفقیت در ابر ذخیره شدند');
+            console.log('🔗 لینک:', result.html_url);
             
-            // به‌روزرسانی زمان آخرین همگام‌سازی
-            syncStatus.lastSync = new Date().toISOString();
-            localStorage.setItem('last_sync_time', syncStatus.lastSync);
+            // ذخیره زمان آخرین همگام‌سازی
+            localStorage.setItem('last_cloud_sync', new Date().toISOString());
             
-            console.log('✅ همه داده‌ها با موفقیت در ابر ذخیره شدند');
-            console.log('🔗 لینک Gist:', result.html_url);
-            
-            updateSyncStatus('success', 'همه داده‌ها ذخیره شدند');
             showAlert('success', '✅ همه داده‌ها با موفقیت در ابر ذخیره شدند');
-            
-            return { 
-                success: true, 
-                gistId: result.id,
-                url: result.html_url
-            };
+            return true;
             
         } catch (error) {
-            console.error('❌ خطا در ذخیره داده‌ها:', error);
-            updateSyncStatus('error', `خطا: ${error.message}`);
+            console.error('❌ خطا در ذخیره‌سازی ابری:', error);
             showAlert('error', `خطا در ذخیره ابری: ${error.message}`);
-            
-            return { 
-                success: false, 
-                error: error.message
-            };
+            return false;
         } finally {
             hideLoading();
         }
     }
 
-    async function loadAllDataFromGitHub() {
-        if (!GITHUB_CONFIG.token) {
-            console.log('❌ توکن GitHub تنظیم نشده است');
+    async function loadAllDataFromCloud() {
+        if (!CLOUD_CONFIG.token) {
             showAlert('error', 'لطفاً ابتدا توکن GitHub را تنظیم کنید');
-            return { success: false, error: 'توکن تنظیم نشده' };
+            return false;
         }
         
         if (!navigator.onLine) {
-            console.log('📴 دستگاه آفلاین است');
             showAlert('warning', 'اتصال اینترنت برقرار نیست');
-            return { success: false, error: 'آفلاین' };
+            return false;
         }
         
-        updateSyncStatus('syncing', 'در حال بارگیری داده‌ها از ابر...');
+        console.log('☁️ شروع بارگیری از ابر...');
         showLoading();
         
         try {
-            // استفاده از Gist ID ثابت
-            const gistId = MAIN_GIST_ID;
+            // شناسه Gist ثابت
+            const gistId = CLOUD_CONFIG.mainGistId;
             
             const response = await fetch(`https://api.github.com/gists/${gistId}`, {
                 headers: {
-                    'Authorization': `token ${GITHUB_CONFIG.token}`,
+                    'Authorization': `token ${CLOUD_CONFIG.token}`,
                     'Accept': 'application/vnd.github.v3+json'
                 }
             });
             
             if (!response.ok) {
                 if (response.status === 404) {
-                    throw new Error('هنوز داده‌ای در ابر ذخیره نشده است');
+                    throw new Error('هنوز داده‌ای در ابر ذخیره نشده است. ابتدا در دستگاه دیگر "ذخیره در ابر" را بزنید.');
                 }
-                throw new Error(`خطای ${response.status}`);
+                throw new Error(`خطای GitHub: ${response.status}`);
             }
             
             const gist = await response.json();
-            const file = gist.files['lab_management_data.json'];
+            const file = gist.files['lab_system_backup.json'];
             
             if (!file) {
-                throw new Error('فایل داده‌ها در Gist پیدا نشد');
+                throw new Error('فایل پشتیبان در Gist یافت نشد');
             }
             
             const allData = JSON.parse(file.content);
@@ -2470,7 +2421,7 @@
                 throw new Error('داده‌های نامعتبر در ابر یافت شد');
             }
             
-            // بارگذاری داده‌ها در حافظه محلی
+            // بارگذاری داده‌ها
             patients = allData.patients || [];
             examinations = allData.examinations || [];
             settings = allData.settings || {};
@@ -2486,21 +2437,7 @@
             loginHistory = allData.loginHistory || [];
             
             // ذخیره در localStorage
-            localStorage.setItem('lab_patients', JSON.stringify(patients));
-            localStorage.setItem('lab_examinations', JSON.stringify(examinations));
-            localStorage.setItem('lab_settings', JSON.stringify([settings]));
-            localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
-            
-            // به‌روزرسانی زمان آخرین همگام‌سازی
-            syncStatus.lastSync = new Date().toISOString();
-            localStorage.setItem('last_sync_time', syncStatus.lastSync);
-            
-            console.log('✅ همه داده‌ها از ابر بارگیری شدند');
-            console.log('📊 آمار:', {
-                patients: patients.length,
-                examinations: examinations.length,
-                lastSync: allData.syncInfo?.lastSync
-            });
+            saveAllData();
             
             // به‌روزرسانی رابط کاربری
             loadPatientsTable();
@@ -2509,98 +2446,29 @@
             updateDashboard();
             updateLoginHistory();
             
-            updateSyncStatus('success', 'داده‌ها بارگیری شدند');
-            updateGitHubStatusDisplay();
-            showAlert('success', '✅ همه داده‌ها از ابر بارگیری شدند');
+            // ذخیره زمان آخرین همگام‌سازی
+            localStorage.setItem('last_cloud_sync', new Date().toISOString());
             
-            return { 
-                success: true, 
-                stats: {
-                    patients: patients.length,
-                    examinations: examinations.length
-                }
-            };
+            console.log('✅ داده‌ها با موفقیت از ابر بارگیری شدند');
+            showAlert('success', '✅ همه داده‌ها با موفقیت از ابر بارگیری شدند');
+            return true;
             
         } catch (error) {
-            console.error('❌ خطا در بارگیری داده‌ها:', error);
-            updateSyncStatus('error', `خطا: ${error.message}`);
-            
-            if (error.message !== 'هنوز داده‌ای در ابر ذخیره نشده است') {
-                showAlert('error', `خطا در بارگیری از ابر: ${error.message}`);
-            }
-            
-            return { 
-                success: false, 
-                error: error.message
-            };
+            console.error('❌ خطا در بارگیری از ابر:', error);
+            showAlert('error', `خطا در بارگیری از ابر: ${error.message}`);
+            return false;
         } finally {
             hideLoading();
         }
     }
 
+    // توابع اصلی برای دکمه‌ها
     async function syncAllWithGitHub() {
-        const result = await saveAllDataToGitHub();
-        return result.success;
+        return await saveAllDataToCloud();
     }
 
     async function loadAllFromGitHub() {
-        const result = await loadAllDataFromGitHub();
-        return result.success;
-    }
-
-    function updateGitHubStatusDisplay() {
-        const syncDisplay = document.getElementById('syncStatusDisplay');
-        if (!syncDisplay) return;
-        
-        if (!GITHUB_CONFIG.token) {
-            syncDisplay.innerHTML = '<span style="color: var(--warning-color);">❌ توکن تنظیم نشده است</span>';
-            return;
-        }
-        
-        if (!navigator.onLine) {
-            syncDisplay.innerHTML = '<span style="color: var(--warning-color);">📴 حالت آفلاین</span>';
-            return;
-        }
-        
-        if (syncStatus.lastSync) {
-            const lastSyncDate = new Date(syncStatus.lastSync);
-            const now = new Date();
-            const diffMinutes = Math.floor((now - lastSyncDate) / (1000 * 60));
-            
-            if (diffMinutes < 5) {
-                syncDisplay.innerHTML = `<span style="color: var(--success-color);">✅ همگام - ${diffMinutes} دقیقه قبل</span>`;
-            } else if (diffMinutes < 60) {
-                syncDisplay.innerHTML = `<span style="color: var(--warning-color);">⚠️ ${diffMinutes} دقیقه از آخرین همگام‌سازی گذشته</span>`;
-            } else {
-                const hours = Math.floor(diffMinutes / 60);
-                syncDisplay.innerHTML = `<span style="color: var(--danger-color);">❌ ${hours} ساعت از آخرین همگام‌سازی گذشته</span>`;
-            }
-        } else {
-            syncDisplay.innerHTML = '<span style="color: var(--info-color);">ℹ️ هنوز همگام‌سازی نشده است</span>';
-        }
-    }
-
-    function updateSyncStatus(status, message) {
-        const statusElement = document.getElementById('syncStatus');
-        if (!statusElement) return;
-        
-        statusElement.classList.remove('syncing', 'success', 'error', 'warning');
-        
-        if (status) {
-            statusElement.classList.add(status);
-        }
-        
-        const icon = status === 'syncing' ? '🔄' : 
-                     status === 'success' ? '✅' : 
-                     status === 'error' ? '❌' : 'ℹ️';
-        
-        statusElement.innerHTML = `<i class="fas fa-cloud"></i> <span>${icon} ${message}</span>`;
-        
-        if (status !== 'syncing') {
-            setTimeout(() => {
-                statusElement.style.opacity = '0.7';
-            }, 5000);
-        }
+        return await loadAllDataFromCloud();
     }
 
     // ==================== Data Management ====================
@@ -2609,7 +2477,7 @@
         showLoading();
         
         try {
-            // ابتدا از localStorage بارگیری کن
+            // بارگذاری از localStorage
             patients = loadFromLocalStorage('patients');
             examinations = loadFromLocalStorage('examinations');
             
@@ -2636,9 +2504,6 @@
             loadExaminations();
             updateDashboard();
             updateLoginHistory();
-            
-            // به‌روزرسانی وضعیت GitHub
-            updateGitHubStatusDisplay();
             
             console.log('✅ بارگذاری داده‌ها کامل شد');
             
@@ -2673,16 +2538,6 @@
             localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
             
             console.log('✅ داده‌ها در حافظه محلی ذخیره شدند');
-            
-            // اگر تنظیمات GitHub وجود دارد، در ابر هم ذخیره کن
-            if (GITHUB_CONFIG.token && navigator.onLine) {
-                console.log('☁️ ذخیره خودکار در ابر...');
-                try {
-                    await saveAllDataToGitHub();
-                } catch (error) {
-                    console.error('⚠️ خطا در ذخیره خودکار ابری:', error);
-                }
-            }
         } catch (error) {
             console.error('❌ خطا در ذخیره داده‌ها:', error);
         }
