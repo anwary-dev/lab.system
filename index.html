@@ -1704,108 +1704,168 @@
     </div>
 
     <script>
-        // ==================== Global Variables ====================
-        let patients = [];
-        let examinations = [];
-        let settings = {};
-        let loginHistory = [];
-        let users = {};
-        let editingPatientId = null;
-        let editingExamId = null;
-        let currentLanguage = 'fa';
-        let weeklyChart = null;
-        let incomeChart = null;
-        let currentOperation = null;
+    
+    // ==================== Global Variables ====================
+    let patients = [];
+    let examinations = [];
+    let settings = {};
+    let loginHistory = [];
+    let users = {};
+    let editingPatientId = null;
+    let editingExamId = null;
+    let currentLanguage = 'fa';
+    let weeklyChart = null;
+    let incomeChart = null;
+    let currentOperation = null;
+    
+    // ==================== GitHub Cloud Storage Configuration ====================
+    const GITHUB_CONFIG = {
+        token: '', // توکن GitHub خود را اینجا قرار دهید
+        username: 'anwary-dev' // نام کاربری GitHub خود را اینجا قرار دهید
+    };
+
+    let syncStatus = {
+        lastSync: null,
+        isSyncing: false,
+        lastError: null
+    };
+
+    // ==================== Login System ====================
+    function initLoginSystem() {
+        console.log('🚀 راه اندازی سیستم ورود...');
         
-        // ==================== GitHub Cloud Storage Configuration ====================
-        const GITHUB_CONFIG = {
-            token: '', // توکن GitHub خود را اینجا قرار دهید
-            username: 'anwary-dev' // نام کاربری GitHub خود را اینجا قرار دهید
-        };
-
-        let syncStatus = {
-            lastSync: null,
-            isSyncing: false,
-            lastError: null
-        };
-
-        // ==================== Login System ====================
-        function initLoginSystem() {
-            const isLoggedIn = localStorage.getItem('lab_logged_in');
-            const currentUser = localStorage.getItem('lab_current_user');
-            
-            if (isLoggedIn === 'true' && currentUser) {
-                showMainApp();
-                loadAllData();
-                updateDateTime();
-            } else {
-                showLoginPage();
-            }
-            
-            document.getElementById('loginForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                login();
-            });
+        // بارگذاری اولیه کاربران
+        initUsers();
+        
+        // بررسی وضعیت ورود
+        const isLoggedIn = localStorage.getItem('lab_logged_in');
+        const currentUser = localStorage.getItem('lab_current_user');
+        
+        if (isLoggedIn === 'true' && currentUser && users[currentUser]) {
+            console.log('✅ کاربر وارد شده است:', currentUser);
+            showMainApp();
+            loadAllData();
+            updateDateTime();
+        } else {
+            console.log('🔐 نیاز به ورود');
+            showLoginPage();
         }
+        
+        // تنظیم فرم ورود
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            login();
+        });
+    }
 
-        function initUsers() {
-            const savedUsers = localStorage.getItem('lab_users');
-            users = savedUsers ? JSON.parse(savedUsers) : {};
-            
-            if (!users['admin']) {
-                users['admin'] = {
-                    username: 'admin',
-                    password: 'admin123',
-                    role: 'admin',
-                    created: new Date().toISOString()
-                };
-                localStorage.setItem('lab_users', JSON.stringify(users));
+    function initUsers() {
+        console.log('📝 بارگذاری کاربران...');
+        
+        // بارگذاری کاربران از localStorage
+        const savedUsers = localStorage.getItem('lab_users');
+        if (savedUsers) {
+            try {
+                const usersArray = JSON.parse(savedUsers);
+                users = {};
+                usersArray.forEach(user => {
+                    users[user.username] = user;
+                });
+                console.log('✅ کاربران بارگذاری شدند:', Object.keys(users));
+            } catch (e) {
+                console.error('❌ خطا در بارگذاری کاربران:', e);
+                users = {};
             }
-            
-            const savedLoginHistory = localStorage.getItem('lab_login_history');
-            loginHistory = savedLoginHistory ? JSON.parse(savedLoginHistory) : [];
+        } else {
+            users = {};
         }
-
-        function login() {
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value.trim();
-            const errorDiv = document.getElementById('loginError');
-            
-            if (users[username] && users[username].password === password) {
-                localStorage.setItem('lab_logged_in', 'true');
-                localStorage.setItem('lab_current_user', username);
-                
-                const loginEntry = {
-                    timestamp: new Date().toISOString(),
-                    user: username,
-                    status: 'موفق',
-                    ip: '127.0.0.1'
-                };
-                loginHistory.push(loginEntry);
-                localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
-                
-                showMainApp();
-                loadAllData();
-                updateDateTime();
-                
-                showAlert('success', 'ورود موفقیت‌آمیز بود. خوش آمدید!');
-            } else {
-                errorDiv.style.display = 'block';
-                document.getElementById('password').value = '';
-                
-                const loginEntry = {
-                    timestamp: new Date().toISOString(),
-                    user: username,
-                    status: 'ناموفق',
-                    ip: '127.0.0.1'
-                };
-                loginHistory.push(loginEntry);
-                localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
-            }
+        
+        // ایجاد کاربر پیش فرض admin اگر وجود ندارد
+        if (!users['admin']) {
+            console.log('👑 ایجاد کاربر admin پیش فرض...');
+            users['admin'] = {
+                username: 'admin',
+                password: 'admin123',
+                role: 'admin',
+                created: new Date().toISOString(),
+                name: 'مدیر سیستم'
+            };
+            saveUsers();
+            console.log('✅ کاربر admin ایجاد شد');
         }
+        
+        // بارگذاری تاریخچه ورودها
+        const savedLoginHistory = localStorage.getItem('lab_login_history');
+        loginHistory = savedLoginHistory ? JSON.parse(savedLoginHistory) : [];
+    }
 
-        function logout() {
-            if (confirm('آیا از خروج از سیستم مطمئن هستید؟')) {
+    function saveUsers() {
+        const usersArray = Object.values(users);
+        localStorage.setItem('lab_users', JSON.stringify(usersArray));
+        console.log('💾 کاربران ذخیره شدند');
+    }
+
+    function login() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value.trim();
+        const errorDiv = document.getElementById('loginError');
+        
+        console.log('🔐 تلاش ورود:', username);
+        
+        // اعتبارسنجی
+        if (users[username] && users[username].password === password) {
+            console.log('✅ ورود موفق');
+            
+            // ذخیره وضعیت ورود
+            localStorage.setItem('lab_logged_in', 'true');
+            localStorage.setItem('lab_current_user', username);
+            
+            // ثبت در تاریخچه
+            const loginEntry = {
+                timestamp: new Date().toISOString(),
+                user: username,
+                status: 'موفق',
+                ip: '127.0.0.1'
+            };
+            loginHistory.push(loginEntry);
+            localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
+            
+            // نمایش برنامه اصلی
+            showMainApp();
+            loadAllData();
+            updateDateTime();
+            
+            // نمایش پیام موفقیت
+            showAlert('success', 'ورود موفقیت‌آمیز بود. خوش آمدید!');
+            
+        } else {
+            console.log('❌ ورود ناموفق');
+            errorDiv.style.display = 'block';
+            document.getElementById('password').value = '';
+            
+            // ثبت در تاریخچه ناموفق
+            const loginEntry = {
+                timestamp: new Date().toISOString(),
+                user: username,
+                status: 'ناموفق',
+                ip: '127.0.0.1'
+            };
+            loginHistory.push(loginEntry);
+            localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
+        }
+    }
+
+    function logout() {
+        Swal.fire({
+            title: 'خروج از سیستم',
+            text: 'آیا از خروج از سیستم مطمئن هستید؟',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'بله، خروج',
+            cancelButtonText: 'لغو',
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#6b7280'
+        }).then((result) => {
+            if (result.isConfirmed) {
                 const currentUser = localStorage.getItem('lab_current_user');
                 const logoutEntry = {
                     timestamp: new Date().toISOString(),
@@ -1820,531 +1880,350 @@
                 localStorage.removeItem('lab_current_user');
                 showLoginPage();
             }
-        }
+        });
+    }
 
-        function showLoginPage() {
-            document.getElementById('loginPage').style.display = 'flex';
-            document.getElementById('mainApp').style.display = 'none';
-            document.getElementById('loginError').style.display = 'none';
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-        }
+    function showLoginPage() {
+        document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('mainApp').style.display = 'none';
+        document.getElementById('loginError').style.display = 'none';
+        document.getElementById('username').value = 'admin';
+        document.getElementById('password').value = 'admin123';
+    }
 
-        function showMainApp() {
-            document.getElementById('loginPage').style.display = 'none';
-            document.getElementById('mainApp').style.display = 'block';
-            document.getElementById('mainApp').classList.add('active');
-            
-            const currentUser = localStorage.getItem('lab_current_user');
-            document.getElementById('userName').textContent = currentUser || 'مدیر سیستم';
-        }
+    function showMainApp() {
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'block';
+        
+        const currentUser = localStorage.getItem('lab_current_user');
+        const userInfo = users[currentUser];
+        document.getElementById('userName').textContent = userInfo?.name || currentUser || 'مدیر سیستم';
+        document.getElementById('currentUsername').value = currentUser || 'admin';
+    }
 
-        function togglePassword(inputId) {
-            const input = document.getElementById(inputId);
-            const toggleBtn = input.parentNode.querySelector('.password-toggle i');
-            
-            if (input.type === 'password') {
-                input.type = 'text';
-                toggleBtn.classList.remove('fa-eye');
-                toggleBtn.classList.add('fa-eye-slash');
-            } else {
-                input.type = 'password';
-                toggleBtn.classList.remove('fa-eye-slash');
-                toggleBtn.classList.add('fa-eye');
-            }
+    function togglePassword(inputId) {
+        const input = document.getElementById(inputId);
+        const icon = input.parentNode.querySelector('.password-toggle i');
+        
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        } else {
+            input.type = 'password';
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
         }
+    }
 
-        // ==================== Date and Time ====================
-        function updateDateTime() {
-            const now = new Date();
-            
-            if (currentLanguage === 'fa') {
-                const dateFormatter = new Intl.DateTimeFormat('fa-IR', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    weekday: 'long'
-                });
-                
-                const timeFormatter = new Intl.DateTimeFormat('fa-IR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-                
-                document.getElementById('currentDate').textContent = dateFormatter.format(now);
-                document.getElementById('currentTime').textContent = timeFormatter.format(now);
-            } else {
-                const options = { 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric',
-                    weekday: 'long'
-                };
-                document.getElementById('currentDate').textContent = now.toLocaleDateString('en-US', options);
-                document.getElementById('currentTime').textContent = now.toLocaleTimeString('en-US');
-            }
+    // ==================== Password Change System ====================
+    function changePassword() {
+        const currentUser = localStorage.getItem('lab_current_user');
+        const currentPassword = document.getElementById('currentPassword').value;
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        
+        // اعتبارسنجی
+        if (!currentUser) {
+            showAlert('error', 'کاربری یافت نشد!');
+            return;
         }
+        
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            showAlert('error', 'لطفاً همه فیلدها را پر کنید.');
+            return;
+        }
+        
+        if (newPassword.length < 6) {
+            showAlert('error', 'رمز عبور جدید باید حداقل ۶ کاراکتر باشد.');
+            return;
+        }
+        
+        if (newPassword !== confirmPassword) {
+            showAlert('error', 'رمز عبور جدید و تکرار آن مطابقت ندارند.');
+            return;
+        }
+        
+        // بررسی رمز فعلی
+        if (users[currentUser].password !== currentPassword) {
+            showAlert('error', 'رمز عبور فعلی نادرست است.');
+            return;
+        }
+        
+        // تغییر رمز
+        users[currentUser].password = newPassword;
+        users[currentUser].lastPasswordChange = new Date().toISOString();
+        saveUsers();
+        
+        // پاک کردن فرم
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        document.getElementById('confirmPassword').value = '';
+        
+        showAlert('success', 'رمز عبور با موفقیت تغییر یافت.');
+    }
 
-        // ==================== Tab Management ====================
-        function showTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            const tabContent = document.getElementById(tabName);
-            if (tabContent) {
-                tabContent.classList.add('active');
-            }
-            
-            document.querySelectorAll('.tab').forEach(tab => {
-                if (tab.getAttribute('data-tab') === tabName) {
-                    tab.classList.add('active');
+    // ==================== Reset and Delete Functions ====================
+    function showResetModal() {
+        currentOperation = 'reset';
+        document.getElementById('verifyPassword').value = '';
+        document.getElementById('verifyError').style.display = 'none';
+        document.getElementById('passwordModal').style.display = 'flex';
+    }
+
+    function showDeleteModal() {
+        currentOperation = 'delete';
+        document.getElementById('verifyPassword').value = '';
+        document.getElementById('verifyError').style.display = 'none';
+        document.getElementById('passwordModal').style.display = 'flex';
+    }
+
+    function closePasswordModal() {
+        document.getElementById('passwordModal').style.display = 'none';
+        currentOperation = null;
+    }
+
+    function verifyPassword() {
+        const password = document.getElementById('verifyPassword').value;
+        const currentUser = localStorage.getItem('lab_current_user');
+        const errorDiv = document.getElementById('verifyError');
+        
+        if (!currentUser) {
+            errorDiv.style.display = 'block';
+            errorDiv.querySelector('span').textContent = 'کاربری یافت نشد.';
+            return;
+        }
+        
+        // بررسی رمز عبور
+        if (users[currentUser].password !== password) {
+            errorDiv.style.display = 'block';
+            errorDiv.querySelector('span').textContent = 'رمز عبور نادرست است.';
+            return;
+        }
+        
+        // رمز صحیح است
+        errorDiv.style.display = 'none';
+        closePasswordModal();
+        
+        if (currentOperation === 'reset') {
+            Swal.fire({
+                title: 'بازنشانی سیستم',
+                text: 'آیا مطمئن هستید که می‌خواهید سیستم را به حالت اولیه بازنشانی کنید؟\nتمامی داده‌های بیماران و معاینات حذف خواهند شد.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'بله، بازنشانی کن',
+                cancelButtonText: 'لغو',
+                confirmButtonColor: '#ef4444',
+                cancelButtonColor: '#6b7280'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    resetSystem();
                 }
             });
-            
-            switch(tabName) {
-                case 'patients':
-                    loadPatientsTable();
-                    break;
-                case 'examinations':
-                    loadExaminations();
-                    break;
-                case 'financial':
-                    loadFinancialData();
-                    updateFinancialChart();
-                    break;
-                case 'dashboard':
-                    updateDashboard();
-                    updateLoginHistory();
-                    break;
-                case 'reports':
-                    const today = new Date().toISOString().split('T')[0];
-                    document.getElementById('reportFrom').value = today;
-                    document.getElementById('reportTo').value = today;
-                    break;
-                case 'settings':
-                    const currentUser = localStorage.getItem('lab_current_user');
-                    if (currentUser) {
-                        document.getElementById('currentUsername').value = currentUser;
-                    }
-                    break;
-            }
+        } else if (currentOperation === 'delete') {
+            Swal.fire({
+                title: 'حذف همه داده‌ها',
+                text: 'آیا مطمئن هستید که می‌خواهید تمامی داده‌ها را حذف کنید؟\nاین عمل غیرقابل بازگشت است!',
+                icon: 'error',
+                showCancelButton: true,
+                confirmButtonText: 'بله، حذف کن',
+                cancelButtonText: 'لغو',
+                confirmButtonColor: '#ef4444',
+                cancelButtonColor: '#6b7280'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    deleteAllData();
+                }
+            });
         }
+    }
 
-        // ==================== GitHub Cloud Storage Functions ====================
-        async function saveToGitHub(dataType, data) {
-            if (!GITHUB_CONFIG.token || !navigator.onLine) {
-                console.log(`📴 حالت آفلاین - ${dataType} در localStorage ذخیره شد`);
-                localStorage.setItem(`lab_${dataType}`, JSON.stringify(data));
-                return { success: true, source: 'local' };
-            }
-            
-            updateSyncStatus('syncing', `در حال ذخیره ${dataType}...`);
-            
-            try {
-                const filename = `${dataType}.json`;
-                const content = JSON.stringify(data, null, 2);
-                const description = `Lab Management - ${dataType} - ${new Date().toLocaleString('fa-IR')}`;
-                
-                let gistId = localStorage.getItem(`github_gist_${dataType}`);
-                
-                const gistData = {
-                    description: description,
-                    public: false,
-                    files: {
-                        [filename]: {
-                            content: content
-                        }
-                    }
-                };
-                
-                let response;
-                const headers = {
-                    'Authorization': `token ${GITHUB_CONFIG.token}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/vnd.github.v3+json'
-                };
-                
-                if (gistId) {
-                    response = await fetch(`https://api.github.com/gists/${gistId}`, {
-                        method: 'PATCH',
-                        headers: headers,
-                        body: JSON.stringify(gistData)
-                    });
-                } else {
-                    response = await fetch('https://api.github.com/gists', {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify(gistData)
-                    });
-                }
-                
-                const result = await response.json();
-                
-                if (response.ok) {
-                    localStorage.setItem(`github_gist_${dataType}`, result.id);
-                    localStorage.setItem(`lab_${dataType}`, JSON.stringify(data));
-                    
-                    syncStatus.lastSync = new Date().toISOString();
-                    localStorage.setItem('last_sync_time', syncStatus.lastSync);
-                    
-                    updateSyncStatus('success', `${dataType} با موفقیت ذخیره شد`);
-                    
-                    return { 
-                        success: true, 
-                        source: 'github',
-                        gistId: result.id,
-                        url: result.html_url 
-                    };
-                    
-                } else {
-                    throw new Error(result.message || 'خطای ناشناخته');
-                }
-                
-            } catch (error) {
-                console.error(`❌ خطا در ذخیره ${dataType}:`, error);
-                localStorage.setItem(`lab_${dataType}`, JSON.stringify(data));
-                
-                syncStatus.lastError = error.message;
-                updateSyncStatus('error', `خطا: ${error.message}`);
-                
-                return { 
-                    success: false, 
-                    source: 'local',
-                    error: error.message 
-                };
-            }
+    function resetSystem() {
+        // حذف داده‌ها
+        patients = [];
+        examinations = [];
+        
+        // تنظیمات پیش‌فرض
+        settings = {
+            labName: 'سیستم مدیریت لابراتوار',
+            labPhone: '0797877773',
+            labAddress: 'هرات، افغانستان',
+            currency: 'افغانی',
+            taxRate: 0,
+            consultationFee: 200,
+            language: 'fa',
+            created: new Date().toISOString()
+        };
+        
+        // ذخیره داده‌ها
+        saveAllData();
+        
+        // ثبت در تاریخچه
+        const currentUser = localStorage.getItem('lab_current_user');
+        const resetEntry = {
+            timestamp: new Date().toISOString(),
+            user: currentUser,
+            status: 'بازنشانی سیستم',
+            ip: '127.0.0.1'
+        };
+        loginHistory.push(resetEntry);
+        localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
+        
+        // بارگذاری مجدد
+        loadAllData();
+        showTab('dashboard');
+        
+        showAlert('success', 'سیستم با موفقیت بازنشانی شد.');
+    }
+
+    function deleteAllData() {
+        // حذف تمامی داده‌ها به جز کاربران
+        patients = [];
+        examinations = [];
+        settings = {};
+        loginHistory = [];
+        
+        // حذف از localStorage
+        localStorage.removeItem('lab_patients');
+        localStorage.removeItem('lab_examinations');
+        localStorage.removeItem('lab_settings');
+        localStorage.removeItem('lab_login_history');
+        
+        // حذف از GitHub gists
+        localStorage.removeItem('github_gist_patients');
+        localStorage.removeItem('github_gist_examinations');
+        localStorage.removeItem('github_gist_settings');
+        localStorage.removeItem('github_gist_login_history');
+        
+        // ثبت در تاریخچه
+        const currentUser = localStorage.getItem('lab_current_user');
+        const deleteEntry = {
+            timestamp: new Date().toISOString(),
+            user: currentUser,
+            status: 'حذف همه داده‌ها',
+            ip: '127.0.0.1'
+        };
+        loginHistory.push(deleteEntry);
+        localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
+        
+        // بارگذاری مجدد
+        loadAllData();
+        showTab('dashboard');
+        
+        showAlert('success', 'تمامی داده‌ها با موفقیت حذف شدند.');
+    }
+
+    // ==================== Date and Time ====================
+    function updateDateTime() {
+        const now = new Date();
+        
+        const dateFormatter = new Intl.DateTimeFormat('fa-IR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long'
+        });
+        
+        const timeFormatter = new Intl.DateTimeFormat('fa-IR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        
+        document.getElementById('currentDate').textContent = dateFormatter.format(now);
+        document.getElementById('currentTime').textContent = timeFormatter.format(now);
+    }
+
+    // ==================== Tab Management ====================
+    function showTab(tabName) {
+        // پنهان کردن همه تب‌ها
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // نمایش تب انتخاب شده
+        const tabContent = document.getElementById(tabName);
+        if (tabContent) {
+            tabContent.classList.add('active');
         }
-
-        async function loadFromGitHub(dataType) {
-            if (!GITHUB_CONFIG.token || !navigator.onLine) {
-                console.log(`📴 حالت آفلاین - بارگذاری ${dataType} از localStorage`);
-                return loadFromLocalStorage(dataType);
+        
+        // فعال کردن تب در نوار تب‌ها
+        document.querySelectorAll('.tab').forEach(tab => {
+            if (tab.getAttribute('data-tab') === tabName) {
+                tab.classList.add('active');
             }
-            
-            updateSyncStatus('syncing', `در حال بارگذاری ${dataType}...`);
-            
-            try {
-                const gistId = localStorage.getItem(`github_gist_${dataType}`);
-                
-                if (!gistId) {
-                    console.log(`ℹ️ هیچ Gist یافت نشد برای ${dataType}`);
-                    return loadFromLocalStorage(dataType);
-                }
-                
-                const response = await fetch(`https://api.github.com/gists/${gistId}`, {
-                    headers: {
-                        'Authorization': `token ${GITHUB_CONFIG.token}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    if (response.status === 404) {
-                        localStorage.removeItem(`github_gist_${dataType}`);
-                        throw new Error('Gist یافت نشد. از داده‌های محلی استفاده می‌شود.');
-                    }
-                    throw new Error(`خطای سرور: ${response.status}`);
-                }
-                
-                const gist = await response.json();
-                const filename = `${dataType}.json`;
-                const file = gist.files[filename];
-                
-                if (!file) {
-                    throw new Error(`فایل ${filename} در Gist یافت نشد`);
-                }
-                
-                const data = JSON.parse(file.content);
-                localStorage.setItem(`lab_${dataType}`, JSON.stringify(data));
-                
-                updateSyncStatus('success', `${dataType} با موفقیت بارگذاری شد`);
-                
-                return data;
-                
-            } catch (error) {
-                console.error(`❌ خطا در بارگذاری ${dataType}:`, error);
-                const localData = loadFromLocalStorage(dataType);
-                
-                syncStatus.lastError = error.message;
-                updateSyncStatus('warning', `استفاده از داده‌های محلی`);
-                
-                return localData;
-            }
-        }
-
-        function loadFromLocalStorage(dataType) {
-            const data = localStorage.getItem(`lab_${dataType}`);
-            if (data) {
-                try {
-                    return JSON.parse(data);
-                } catch (e) {
-                    console.error(`خطا در parse کردن ${dataType}:`, e);
-                    return (dataType === 'settings' ? {} : []);
-                }
-            }
-            return (dataType === 'settings' ? {} : []);
-        }
-
-        async function syncAllWithGitHub() {
-            if (!GITHUB_CONFIG.token) {
-                showAlert('warning', 'لطفاً ابتدا توکن GitHub را تنظیم کنید');
-                return false;
-            }
-            
-            if (!navigator.onLine) {
-                showAlert('warning', 'اتصال اینترنت برقرار نیست');
-                return false;
-            }
-            
-            showLoading();
-            updateSyncStatus('syncing', 'شروع همگام‌سازی کامل...');
-            
-            try {
-                const results = await Promise.allSettled([
-                    saveToGitHub('patients', patients),
-                    saveToGitHub('examinations', examinations),
-                    saveToGitHub('settings', [settings]),
-                    saveToGitHub('users', Object.values(users)),
-                    saveToGitHub('login_history', loginHistory)
-                ]);
-                
-                const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
-                const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
-                
-                if (failed === 0) {
-                    updateSyncStatus('success', '✅ همه داده‌ها همگام‌سازی شدند');
-                    showAlert('success', 'همه داده‌ها با موفقیت در ابر ذخیره شدند');
-                    return true;
-                } else if (successful > 0) {
-                    updateSyncStatus('success', `✅ ${successful} از ${results.length} داده همگام‌سازی شد`);
-                    showAlert('success', `بخش‌هایی از داده‌ها همگام‌سازی شدند`);
-                    return true;
-                } else {
-                    throw new Error('همگام‌سازی ناموفق بود');
-                }
-                
-            } catch (error) {
-                console.error('❌ خطا در همگام‌سازی:', error);
-                updateSyncStatus('error', 'خطا در همگام‌سازی');
-                showAlert('error', 'خطا در ذخیره ابری. داده‌ها به صورت محلی ذخیره شدند');
-                return false;
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function loadAllFromGitHub() {
-            if (!GITHUB_CONFIG.token) {
-                showAlert('warning', 'لطفاً ابتدا توکن GitHub را تنظیم کنید');
-                return false;
-            }
-            
-            showLoading();
-            updateSyncStatus('syncing', 'بارگذاری داده‌ها از ابر...');
-            
-            try {
-                const [patientsData, examsData, settingsData, usersData, historyData] = await Promise.all([
-                    loadFromGitHub('patients'),
-                    loadFromGitHub('examinations'),
-                    loadFromGitHub('settings'),
-                    loadFromGitHub('users'),
-                    loadFromGitHub('login_history')
-                ]);
-                
-                if (patientsData && patientsData.length > 0) patients = patientsData;
-                if (examsData && examsData.length > 0) examinations = examsData;
-                if (settingsData && settingsData.length > 0) settings = settingsData[0] || {};
-                if (usersData && usersData.length > 0) {
-                    users = {};
-                    usersData.forEach(user => {
-                        users[user.username] = user;
-                    });
-                }
-                if (historyData && historyData.length > 0) loginHistory = historyData;
-                
-                saveAllData();
+        });
+        
+        // بارگذاری داده‌های مربوط به تب
+        switch(tabName) {
+            case 'patients':
                 loadPatientsTable();
-                loadPatientsSelect();
+                break;
+            case 'examinations':
                 loadExaminations();
+                loadPatientsSelect();
+                break;
+            case 'financial':
+                updateFinancialData();
+                break;
+            case 'dashboard':
                 updateDashboard();
-                updateLoginHistory();
-                
-                updateSyncStatus('success', '✅ همه داده‌ها بارگذاری شدند');
-                showAlert('success', 'داده‌ها با موفقیت از ابر بارگذاری شدند');
-                return true;
-                
-            } catch (error) {
-                console.error('❌ خطا در بارگذاری:', error);
-                updateSyncStatus('error', 'خطا در بارگذاری');
-                showAlert('warning', 'خطا در بارگذاری از ابر. از داده‌های محلی استفاده شد');
-                return false;
-            } finally {
-                hideLoading();
-            }
-        }
-
-        function updateSyncStatus(status, message) {
-            const statusElement = document.getElementById('syncStatus');
-            if (!statusElement) return;
-            
-            statusElement.classList.remove('syncing', 'success', 'error', 'warning');
-            
-            if (status) {
-                statusElement.classList.add(status);
-            }
-            
-            const icon = status === 'syncing' ? '🔄' : 
-                         status === 'success' ? '✅' : 
-                         status === 'error' ? '❌' : 'ℹ️';
-            
-            statusElement.innerHTML = `<i class="fas fa-cloud"></i> <span>${icon} ${message}</span>`;
-            
-            // Update sync status display in settings
-            const syncDisplay = document.getElementById('syncStatusDisplay');
-            if (syncDisplay) {
-                syncDisplay.innerHTML = getSyncStatusText();
-            }
-            
-            if (status !== 'syncing') {
-                setTimeout(() => {
-                    statusElement.style.opacity = '0.7';
-                }, 5000);
-            }
-        }
-
-        function getSyncStatusText() {
-            if (!GITHUB_CONFIG.token) {
-                return '<span style="color: var(--warning-color);">❌ توکن تنظیم نشده است</span>';
-            }
-            
-            if (!navigator.onLine) {
-                return '<span style="color: var(--warning-color);">📴 حالت آفلاین</span>';
-            }
-            
-            if (syncStatus.lastSync) {
-                const lastSyncDate = new Date(syncStatus.lastSync);
-                const now = new Date();
-                const diffMinutes = Math.floor((now - lastSyncDate) / (1000 * 60));
-                
-                if (diffMinutes < 5) {
-                    return `<span style="color: var(--success-color);">✅ همگام - ${diffMinutes} دقیقه قبل</span>`;
-                } else if (diffMinutes < 60) {
-                    return `<span style="color: var(--warning-color);">⚠️ ${diffMinutes} دقیقه از آخرین همگام‌سازی گذشته</span>`;
-                } else {
-                    const hours = Math.floor(diffMinutes / 60);
-                    return `<span style="color: var(--danger-color);">❌ ${hours} ساعت از آخرین همگام‌سازی گذشته</span>`;
+                break;
+            case 'reports':
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('reportFrom').value = today;
+                document.getElementById('reportTo').value = today;
+                break;
+            case 'settings':
+                const currentUser = localStorage.getItem('lab_current_user');
+                if (currentUser) {
+                    document.getElementById('currentUsername').value = currentUser;
                 }
-            }
-            
-            return '<span style="color: var(--info-color);">ℹ️ هنوز همگام‌سازی نشده است</span>';
+                loadSettingsForm();
+                break;
         }
+    }
 
-        function setupAutoSync() {
-            setInterval(async () => {
-                if (GITHUB_CONFIG.token && navigator.onLine && !syncStatus.isSyncing) {
-                    await syncAllWithGitHub();
-                }
-            }, 5 * 60 * 1000);
-            
-            window.addEventListener('online', async () => {
-                if (GITHUB_CONFIG.token) {
-                    updateSyncStatus('syncing', 'اتصال برقرار شد. همگام‌سازی...');
-                    await syncAllWithGitHub();
-                }
-            });
-            
-            const lastSync = localStorage.getItem('last_sync_time');
-            if (lastSync) {
-                syncStatus.lastSync = lastSync;
-                const lastSyncDate = new Date(lastSync);
-                const now = new Date();
-                const diffHours = (now - lastSyncDate) / (1000 * 60 * 60);
-                
-                if (diffHours > 24) {
-                    updateSyncStatus('warning', `آخرین همگام‌سازی: ${Math.floor(diffHours)} ساعت قبل`);
-                }
-            }
+    function loadSettingsForm() {
+        document.getElementById('labName').value = settings.labName || 'سیستم مدیریت لابراتوار';
+        document.getElementById('labPhone').value = settings.labPhone || '0797877773';
+        document.getElementById('labAddress').value = settings.labAddress || 'هرات، افغانستان';
+        document.getElementById('currency').value = settings.currency || 'افغانی';
+        document.getElementById('taxRate').value = settings.taxRate || 0;
+        document.getElementById('consultationFee').value = settings.consultationFee || 200;
+        document.getElementById('language').value = settings.language || 'fa';
+        
+        // بارگذاری تنظیمات GitHub
+        const savedToken = localStorage.getItem('github_token');
+        const savedUsername = localStorage.getItem('github_username');
+        if (savedToken) {
+            document.getElementById('githubToken').value = savedToken;
+            GITHUB_CONFIG.token = savedToken;
         }
-
-        async function saveGitHubSettings() {
-            const token = document.getElementById('githubToken').value.trim();
-            const username = document.getElementById('githubUsername').value.trim();
-            
-            if (!token || !username) {
-                showAlert('error', 'لطفاً توکن و نام کاربری GitHub را وارد کنید');
-                return;
-            }
-            
-            GITHUB_CONFIG.token = token;
-            GITHUB_CONFIG.username = username;
-            
-            await testGitHubConnection();
+        if (savedUsername) {
+            document.getElementById('githubUsername').value = savedUsername;
+            GITHUB_CONFIG.username = savedUsername;
         }
-
-        async function testGitHubConnection() {
-            const resultDiv = document.getElementById('githubTestResult');
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = '<div style="color: var(--info-color);">🔄 در حال تست اتصال...</div>';
-            
-            try {
-                const response = await fetch('https://api.github.com/user', {
-                    headers: {
-                        'Authorization': `token ${GITHUB_CONFIG.token}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
-                
-                if (response.ok) {
-                    const userData = await response.json();
-                    resultDiv.innerHTML = `
-                        <div style="color: var(--success-color); padding: 10px; background: #d1fae5; border-radius: 5px;">
-                            <i class="fas fa-check-circle"></i> <strong>اتصال موفق!</strong><br>
-                            نام: ${userData.name || 'تعیین نشده'}<br>
-                            ایمیل: ${userData.email || 'مخفی'}<br>
-                            حساب: ${userData.login}
-                        </div>
-                    `;
-                    
-                    localStorage.setItem('github_token', GITHUB_CONFIG.token);
-                    localStorage.setItem('github_username', GITHUB_CONFIG.username);
-                    
-                    showAlert('success', 'اتصال به GitHub با موفقیت برقرار شد');
-                    setupAutoSync();
-                    
-                } else {
-                    throw new Error(`خطا: ${response.status} ${response.statusText}`);
-                }
-                
-            } catch (error) {
-                resultDiv.innerHTML = `
-                    <div style="color: var(--danger-color); padding: 10px; background: #fee2e2; border-radius: 5px;">
-                        <i class="fas fa-times-circle"></i> <strong>خطا در اتصال!</strong><br>
-                        ${error.message}<br>
-                        <small>لطفاً توکن و نام کاربری را بررسی کنید</small>
-                    </div>
-                `;
-                
-                showAlert('error', 'خطا در اتصال به GitHub');
-            }
+        
+        // به‌روزرسانی وضعیت همگام‌سازی
+        const syncDisplay = document.getElementById('syncStatusDisplay');
+        if (syncDisplay) {
+            syncDisplay.innerHTML = getSyncStatusText();
         }
+    }
 
-        // ==================== Data Management ====================
-        async function loadAllData() {
-            console.log('بارگذاری همه داده‌ها...');
-            showLoading();
-            
-            const savedToken = localStorage.getItem('github_token');
-            const savedUsername = localStorage.getItem('github_username');
-            
-            if (savedToken) GITHUB_CONFIG.token = savedToken;
-            if (savedUsername) GITHUB_CONFIG.username = savedUsername;
-            
+    // ==================== Data Management ====================
+    async function loadAllData() {
+        console.log('📂 بارگذاری همه داده‌ها...');
+        showLoading();
+        
+        try {
+            // بارگذاری از localStorage
             patients = loadFromLocalStorage('patients');
             examinations = loadFromLocalStorage('examinations');
             
@@ -2353,998 +2232,1495 @@
                 settings = savedSettings[0];
             }
             
-            const savedUsers = loadFromLocalStorage('users');
-            if (savedUsers && savedUsers.length > 0) {
-                savedUsers.forEach(user => {
-                    users[user.username] = user;
-                });
+            const savedLoginHistory = localStorage.getItem('lab_login_history');
+            loginHistory = savedLoginHistory ? JSON.parse(savedLoginHistory) : [];
+            
+            // اگر داده‌ای وجود ندارد، نمونه داده ایجاد کن
+            if (patients.length === 0 && examinations.length === 0) {
+                console.log('📝 ایجاد داده‌های نمونه...');
+                initializeSampleData();
             }
             
-            loginHistory = loadFromLocalStorage('login_history');
-            
-            if (GITHUB_CONFIG.token && navigator.onLine) {
-                try {
-                    await loadAllFromGitHub();
-                } catch (error) {
-                    console.log('استفاده از داده‌های محلی:', error.message);
-                }
-            }
-            
+            // اعمال تنظیمات
             applySettings();
+            
+            // بارگذاری جداول
             loadPatientsTable();
             loadPatientsSelect();
             loadExaminations();
             updateDashboard();
             updateLoginHistory();
             
-            hideLoading();
+            console.log('✅ بارگذاری داده‌ها کامل شد');
             
-            if (patients.length === 0 && examinations.length === 0) {
-                initializeSampleData();
+        } catch (error) {
+            console.error('❌ خطا در بارگذاری داده‌ها:', error);
+            showAlert('error', 'خطا در بارگذاری داده‌ها');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function loadFromLocalStorage(key) {
+        const data = localStorage.getItem(`lab_${key}`);
+        if (data) {
+            try {
+                return JSON.parse(data);
+            } catch (e) {
+                console.error(`❌ خطا در بارگذاری ${key}:`, e);
+                return (key === 'settings' ? {} : []);
             }
         }
+        return (key === 'settings' ? {} : []);
+    }
 
-        async function saveAllData() {
-            console.log('ذخیره همه داده‌ها...');
-            
+    async function saveAllData() {
+        console.log('💾 ذخیره همه داده‌ها...');
+        
+        try {
             localStorage.setItem('lab_patients', JSON.stringify(patients));
             localStorage.setItem('lab_examinations', JSON.stringify(examinations));
             localStorage.setItem('lab_settings', JSON.stringify([settings]));
-            localStorage.setItem('lab_users', JSON.stringify(Object.values(users)));
             localStorage.setItem('lab_login_history', JSON.stringify(loginHistory));
             
-            if (GITHUB_CONFIG.token && navigator.onLine) {
-                try {
-                    await Promise.allSettled([
-                        saveToGitHub('patients', patients),
-                        saveToGitHub('examinations', examinations)
-                    ]);
-                } catch (error) {
-                    console.log('ذخیره ابری با تاخیر انجام می‌شود:', error);
-                }
-            }
+            console.log('✅ داده‌ها ذخیره شدند');
+        } catch (error) {
+            console.error('❌ خطا در ذخیره داده‌ها:', error);
         }
+    }
 
-        function applySettings() {
-            document.getElementById('labName').value = settings.labName || 'سیستم مدیریت لابراتوار';
-            document.getElementById('labPhone').value = settings.labPhone || '0797877773';
-            document.getElementById('labAddress').value = settings.labAddress || 'هرات، افغانستان';
-            document.getElementById('currency').value = settings.currency || 'افغانی';
-            document.getElementById('taxRate').value = settings.taxRate || 0;
-            document.getElementById('consultationFee').value = settings.consultationFee || 200;
-            document.getElementById('language').value = settings.language || 'fa';
+    function applySettings() {
+        // اعمال تنظیمات بر روی صفحه
+        document.title = settings.labName || 'سیستم مدیریت لابراتوار';
+        document.getElementById('labTitle').textContent = settings.labName || 'سیستم مدیریت لابراتوار';
+        document.getElementById('labSubtitle').textContent = `پشتیبانی: ${settings.labPhone || '0797877773'}`;
+        
+        // به‌روزرسانی واحد پول در تمام صفحات
+        document.querySelectorAll('.currency-label').forEach(el => {
+            el.textContent = settings.currency || 'افغانی';
+        });
+    }
+
+    function saveSettings() {
+        settings = {
+            labName: document.getElementById('labName').value,
+            labPhone: document.getElementById('labPhone').value,
+            labAddress: document.getElementById('labAddress').value,
+            currency: document.getElementById('currency').value,
+            taxRate: parseFloat(document.getElementById('taxRate').value) || 0,
+            consultationFee: parseFloat(document.getElementById('consultationFee').value) || 200,
+            language: document.getElementById('language').value,
+            lastModified: new Date().toISOString()
+        };
+        
+        localStorage.setItem('lab_settings', JSON.stringify([settings]));
+        applySettings();
+        
+        showAlert('success', 'تنظیمات با موفقیت ذخیره شد.');
+    }
+
+    // ==================== Patient Management ====================
+    async function savePatient() {
+        const firstName = document.getElementById('firstName').value.trim();
+        const lastName = document.getElementById('lastName').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        
+        // اعتبارسنجی
+        if (!firstName || !lastName || !phone) {
+            showAlert('error', 'لطفاً فیلدهای الزامی (نام، تخلص، شماره تماس) را پر کنید.');
+            return;
         }
-
-        function saveSettings() {
-            settings = {
-                labName: document.getElementById('labName').value,
-                labPhone: document.getElementById('labPhone').value,
-                labAddress: document.getElementById('labAddress').value,
-                currency: document.getElementById('currency').value,
-                taxRate: parseFloat(document.getElementById('taxRate').value) || 0,
-                consultationFee: parseFloat(document.getElementById('consultationFee').value) || 200,
-                language: document.getElementById('language').value,
-                lastModified: new Date().toISOString()
-            };
-            
-            localStorage.setItem('lab_settings', JSON.stringify([settings]));
-            
-            showAlert('success', 'تنظیمات با موفقیت ذخیره شد.');
+        
+        // ایجاد بیمار جدید
+        const patient = {
+            id: editingPatientId || Date.now(),
+            code: 'P' + (patients.length + 1000).toString().padStart(4, '0'),
+            firstName: firstName,
+            lastName: lastName,
+            fatherName: document.getElementById('fatherName').value.trim(),
+            nationalId: document.getElementById('nationalId').value.trim(),
+            birthDate: document.getElementById('birthDate').value,
+            gender: document.getElementById('gender').value,
+            phone: phone,
+            province: document.getElementById('province').value.trim(),
+            district: document.getElementById('district').value.trim(),
+            address: document.getElementById('address').value.trim(),
+            notes: document.getElementById('notes').value.trim(),
+            createdAt: editingPatientId ? patients.find(p => p.id === editingPatientId)?.createdAt : new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        // ذخیره یا ویرایش
+        if (editingPatientId) {
+            const index = patients.findIndex(p => p.id === editingPatientId);
+            if (index !== -1) {
+                patients[index] = patient;
+            }
+        } else {
+            patients.push(patient);
         }
+        
+        // ذخیره داده‌ها
+        await saveAllData();
+        loadPatientsTable();
+        loadPatientsSelect();
+        resetPatientForm();
+        
+        showAlert('success', editingPatientId ? 
+            'اطلاعات بیمار ویرایش شد.' : 
+            'بیمار جدید با موفقیت ثبت شد.');
+        
+        editingPatientId = null;
+    }
 
-        // ==================== Patient Management ====================
-        async function savePatient() {
-            const firstName = document.getElementById('firstName').value.trim();
-            const lastName = document.getElementById('lastName').value.trim();
-            const phone = document.getElementById('phone').value.trim();
-            
-            if (!firstName || !lastName || !phone) {
-                showAlert('error', 'لطفاً فیلدهای الزامی را پر کنید.');
-                return;
-            }
-            
-            const patient = {
-                id: editingPatientId || Date.now(),
-                code: 'P' + (patients.length + 1000).toString().padStart(4, '0'),
-                firstName: firstName,
-                lastName: lastName,
-                fatherName: document.getElementById('fatherName').value.trim(),
-                nationalId: document.getElementById('nationalId').value.trim(),
-                birthDate: document.getElementById('birthDate').value,
-                gender: document.getElementById('gender').value,
-                phone: phone,
-                province: document.getElementById('province').value.trim(),
-                district: document.getElementById('district').value.trim(),
-                address: document.getElementById('address').value.trim(),
-                notes: document.getElementById('notes').value.trim(),
-                createdAt: editingPatientId ? patients.find(p => p.id === editingPatientId)?.createdAt : new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            };
-            
-            if (editingPatientId) {
-                const index = patients.findIndex(p => p.id === editingPatientId);
-                if (index !== -1) {
-                    patients[index] = patient;
-                }
-            } else {
-                patients.push(patient);
-            }
-            
-            await saveAllData();
-            
-            if (GITHUB_CONFIG.token) {
-                await saveToGitHub('patients', patients);
-            }
-            
-            loadPatientsTable();
-            loadPatientsSelect();
-            resetPatientForm();
-            
-            showAlert('success', editingPatientId ? 
-                'بیمار ویرایش شد.' : 
-                'بیمار جدید ثبت شد.');
-            
-            editingPatientId = null;
+    function loadPatientsSelect() {
+        const select = document.getElementById('patientId');
+        const currentValue = select.value;
+        
+        select.innerHTML = '<option value="">انتخاب بیمار</option>';
+        
+        patients.forEach(patient => {
+            const option = document.createElement('option');
+            option.value = patient.id;
+            option.textContent = `${patient.firstName} ${patient.lastName} (${patient.code}) - ${patient.phone}`;
+            select.appendChild(option);
+        });
+        
+        if (currentValue) {
+            select.value = currentValue;
         }
+    }
 
-        function loadPatientsSelect() {
-            const select = document.getElementById('patientId');
-            const currentValue = select.value;
-            
-            select.innerHTML = '<option value="">انتخاب بیمار</option>';
-            
-            patients.forEach(patient => {
-                const option = document.createElement('option');
-                option.value = patient.id;
-                option.textContent = `${patient.firstName} ${patient.lastName} (${patient.code}) - ${patient.phone}`;
-                select.appendChild(option);
-            });
-            
-            if (currentValue) {
-                select.value = currentValue;
-            }
+    function loadPatientsTable() {
+        const tbody = document.getElementById('patientsTableBody');
+        tbody.innerHTML = '';
+        
+        if (patients.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <i class="fas fa-users fa-3x" style="margin-bottom: 15px;"></i>
+                        <h4>هیچ بیماری ثبت نشده است</h4>
+                    </td>
+                </tr>
+            `;
+            return;
         }
-
-        function loadPatientsTable() {
-            const tbody = document.getElementById('patientsTableBody');
-            tbody.innerHTML = '';
-            
-            if (patients.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                            <i class="fas fa-users fa-3x" style="margin-bottom: 15px;"></i>
-                            <h4>هیچ بیماری ثبت نشده است</h4>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            patients.forEach(patient => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${patient.code}</td>
-                    <td>${patient.firstName} ${patient.lastName}</td>
-                    <td>${patient.nationalId || '---'}</td>
-                    <td>${patient.phone}</td>
-                    <td>${formatDate(patient.createdAt)}</td>
-                    <td>
-                        <button class="btn btn-primary btn-sm" onclick="viewPatient(${patient.id})">
+        
+        patients.forEach(patient => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${patient.code}</td>
+                <td>${patient.firstName} ${patient.lastName}</td>
+                <td>${patient.nationalId || '---'}</td>
+                <td>${patient.phone}</td>
+                <td>${formatDate(patient.createdAt)}</td>
+                <td>
+                    <div class="exam-actions">
+                        <button class="btn btn-primary btn-sm" onclick="viewPatient(${patient.id})" title="مشاهده">
                             <i class="fas fa-eye"></i>
                         </button>
-                        <button class="btn btn-warning btn-sm" onclick="editPatient(${patient.id})">
+                        <button class="btn btn-warning btn-sm" onclick="editPatient(${patient.id})" title="ویرایش">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn btn-danger btn-sm" onclick="deletePatient(${patient.id})">
+                        <button class="btn btn-danger btn-sm" onclick="deletePatient(${patient.id})" title="حذف">
                             <i class="fas fa-trash"></i>
                         </button>
-                    </td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
-
-        function resetPatientForm() {
-            document.getElementById('patientForm').reset();
-            editingPatientId = null;
-            document.getElementById('birthDate').value = '1990-01-01';
-        }
-
-        function editPatient(id) {
-            const patient = patients.find(p => p.id === id);
-            if (!patient) return;
-            
-            editingPatientId = id;
-            
-            document.getElementById('firstName').value = patient.firstName;
-            document.getElementById('lastName').value = patient.lastName;
-            document.getElementById('fatherName').value = patient.fatherName || '';
-            document.getElementById('nationalId').value = patient.nationalId || '';
-            document.getElementById('birthDate').value = patient.birthDate || '1990-01-01';
-            document.getElementById('gender').value = patient.gender;
-            document.getElementById('phone').value = patient.phone;
-            document.getElementById('province').value = patient.province || '';
-            document.getElementById('district').value = patient.district || '';
-            document.getElementById('address').value = patient.address || '';
-            document.getElementById('notes').value = patient.notes || '';
-            
-            showTab('patients');
-            document.getElementById('patientForm').scrollIntoView({ behavior: 'smooth' });
-        }
-
-        async function deletePatient(id) {
-            if (!confirm('آیا از حذف این بیمار مطمئن هستید؟')) return;
-            
-            patients = patients.filter(p => p.id !== id);
-            await saveAllData();
-            
-            if (GITHUB_CONFIG.token) {
-                await saveToGitHub('patients', patients);
-            }
-            
-            loadPatientsTable();
-            loadPatientsSelect();
-            
-            showAlert('success', 'بیمار حذف شد.');
-        }
-
-        function viewPatient(id) {
-            const patient = patients.find(p => p.id === id);
-            if (!patient) return;
-            
-            const modalBody = document.getElementById('patientModalBody');
-            modalBody.innerHTML = `
-                <h4>${patient.firstName} ${patient.lastName}</h4>
-                <p><strong>کد بیمار:</strong> ${patient.code}</p>
-                <p><strong>تذکره:</strong> ${patient.nationalId || '---'}</p>
-                <p><strong>نام پدر:</strong> ${patient.fatherName || '---'}</p>
-                <p><strong>تاریخ تولد:</strong> ${patient.birthDate || '---'}</p>
-                <p><strong>جنسیت:</strong> ${patient.gender}</p>
-                <p><strong>شماره تماس:</strong> ${patient.phone}</p>
-                <p><strong>ولایت:</strong> ${patient.province || '---'}</p>
-                <p><strong>ناحیه:</strong> ${patient.district || '---'}</p>
-                <p><strong>آدرس:</strong> ${patient.address || '---'}</p>
-                <p><strong>یادداشت:</strong> ${patient.notes || '---'}</p>
-                <p><strong>تاریخ ثبت:</strong> ${formatDate(patient.createdAt)}</p>
-                
-                <div style="margin-top: 20px;">
-                    <button class="btn btn-primary" onclick="editPatient(${patient.id}); closeModal('patientModal')">
-                        <i class="fas fa-edit"></i> ویرایش
-                    </button>
-                </div>
+                    </div>
+                </td>
             `;
-            
-            document.getElementById('patientModal').style.display = 'flex';
-        }
+            tbody.appendChild(row);
+        });
+    }
 
-        // ==================== Examination Management ====================
-        async function saveExamination() {
-            const patientId = parseInt(document.getElementById('patientId').value);
-            const patient = patients.find(p => p.id === patientId);
-            
-            if (!patient) {
-                showAlert('error', 'لطفا بیمار را انتخاب کنید.');
-                return;
-            }
-            
-            const price = parseFloat(document.getElementById('price').value);
-            if (!price || price <= 0) {
-                showAlert('error', 'لطفا هزینه معتبر وارد کنید.');
-                return;
-            }
-            
-            const exam = {
-                id: editingExamId || Date.now(),
-                patientId: patientId,
-                patientName: `${patient.firstName} ${patient.lastName}`,
-                patientCode: patient.code,
-                date: document.getElementById('examDate').value,
-                type: document.getElementById('examType').value,
-                doctor: document.getElementById('doctor').value,
-                price: price,
-                paymentStatus: document.getElementById('paymentStatus').value,
-                status: document.getElementById('examStatus').value,
-                notes: document.getElementById('examNotes').value,
-                createdAt: editingExamId ? examinations.find(e => e.id === editingExamId)?.createdAt : new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            };
-            
-            if (editingExamId) {
-                const index = examinations.findIndex(e => e.id === editingExamId);
-                if (index !== -1) {
-                    examinations[index] = exam;
-                }
-            } else {
-                examinations.push(exam);
-            }
-            
-            await saveAllData();
-            
-            if (GITHUB_CONFIG.token) {
-                await saveToGitHub('examinations', examinations);
-            }
-            
-            loadExaminations();
-            resetExamForm();
-            
-            showAlert('success', editingExamId 
-                ? 'معاینه ویرایش شد.'
-                : 'معاینه جدید ثبت شد.');
-            
-            editingExamId = null;
-        }
+    function resetPatientForm() {
+        document.getElementById('patientForm').reset();
+        editingPatientId = null;
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('birthDate').value = '1990-01-01';
+    }
 
-        function loadExaminations() {
-            const filterStatus = document.getElementById('filterStatus').value;
-            const filterDate = document.getElementById('filterDate').value;
-            
-            let filteredExams = examinations;
-            
-            if (filterStatus !== 'همه') {
-                filteredExams = filteredExams.filter(e => e.status === filterStatus);
+    function editPatient(id) {
+        const patient = patients.find(p => p.id === id);
+        if (!patient) return;
+        
+        editingPatientId = id;
+        
+        // پر کردن فرم با اطلاعات بیمار
+        document.getElementById('firstName').value = patient.firstName;
+        document.getElementById('lastName').value = patient.lastName;
+        document.getElementById('fatherName').value = patient.fatherName || '';
+        document.getElementById('nationalId').value = patient.nationalId || '';
+        document.getElementById('birthDate').value = patient.birthDate || '1990-01-01';
+        document.getElementById('gender').value = patient.gender;
+        document.getElementById('phone').value = patient.phone;
+        document.getElementById('province').value = patient.province || '';
+        document.getElementById('district').value = patient.district || '';
+        document.getElementById('address').value = patient.address || '';
+        document.getElementById('notes').value = patient.notes || '';
+        
+        showTab('patients');
+        document.getElementById('patientForm').scrollIntoView({ behavior: 'smooth' });
+        
+        showAlert('info', 'در حال ویرایش بیمار. پس از تغییرات، دکمه "ذخیره بیمار" را بزنید.');
+    }
+
+    async function deletePatient(id) {
+        Swal.fire({
+            title: 'حذف بیمار',
+            text: 'آیا از حذف این بیمار مطمئن هستید؟',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'بله، حذف کن',
+            cancelButtonText: 'لغو',
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#6b7280'
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                patients = patients.filter(p => p.id !== id);
+                await saveAllData();
+                loadPatientsTable();
+                loadPatientsSelect();
+                showAlert('success', 'بیمار حذف شد.');
             }
+        });
+    }
+
+    function viewPatient(id) {
+        const patient = patients.find(p => p.id === id);
+        if (!patient) return;
+        
+        const modalBody = document.getElementById('patientModalBody');
+        modalBody.innerHTML = `
+            <h4>${patient.firstName} ${patient.lastName}</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px;">
+                <div>
+                    <p><strong>کد بیمار:</strong> ${patient.code}</p>
+                    <p><strong>نام پدر:</strong> ${patient.fatherName || '---'}</p>
+                    <p><strong>تاریخ تولد:</strong> ${patient.birthDate || '---'}</p>
+                    <p><strong>جنسیت:</strong> ${patient.gender}</p>
+                </div>
+                <div>
+                    <p><strong>تذکره:</strong> ${patient.nationalId || '---'}</p>
+                    <p><strong>شماره تماس:</strong> ${patient.phone}</p>
+                    <p><strong>ولایت:</strong> ${patient.province || '---'}</p>
+                    <p><strong>ناحیه:</strong> ${patient.district || '---'}</p>
+                </div>
+            </div>
+            <p><strong>آدرس:</strong> ${patient.address || '---'}</p>
+            <p><strong>یادداشت:</strong> ${patient.notes || '---'}</p>
+            <p><strong>تاریخ ثبت:</strong> ${formatDate(patient.createdAt)}</p>
+            <p><strong>آخرین ویرایش:</strong> ${formatDate(patient.updatedAt)}</p>
             
-            if (filterDate) {
-                filteredExams = filteredExams.filter(e => e.date === filterDate);
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn btn-primary" onclick="editPatient(${patient.id}); closeModal('patientModal')">
+                    <i class="fas fa-edit"></i> ویرایش
+                </button>
+                <button class="btn btn-info" onclick="addExamForPatient(${patient.id})">
+                    <i class="fas fa-stethoscope"></i> ثبت معاینه جدید
+                </button>
+            </div>
+        `;
+        
+        document.getElementById('patientModal').style.display = 'flex';
+    }
+
+    function addExamForPatient(patientId) {
+        const patient = patients.find(p => p.id === patientId);
+        if (!patient) return;
+        
+        showTab('examinations');
+        document.getElementById('patientId').value = patientId;
+        document.getElementById('examDate').focus();
+        
+        closeModal('patientModal');
+        
+        showAlert('info', `در حال ثبت معاینه برای ${patient.firstName} ${patient.lastName}`);
+    }
+
+    // ==================== Examination Management ====================
+    async function saveExamination() {
+        const patientId = parseInt(document.getElementById('patientId').value);
+        const patient = patients.find(p => p.id === patientId);
+        
+        if (!patient) {
+            showAlert('error', 'لطفاً بیمار را انتخاب کنید.');
+            return;
+        }
+        
+        const price = parseFloat(document.getElementById('price').value);
+        if (!price || price <= 0) {
+            showAlert('error', 'لطفاً هزینه معتبر وارد کنید.');
+            return;
+        }
+        
+        const exam = {
+            id: editingExamId || Date.now(),
+            patientId: patientId,
+            patientName: `${patient.firstName} ${patient.lastName}`,
+            patientCode: patient.code,
+            date: document.getElementById('examDate').value,
+            type: document.getElementById('examType').value,
+            doctor: document.getElementById('doctor').value,
+            price: price,
+            paymentStatus: document.getElementById('paymentStatus').value,
+            status: document.getElementById('examStatus').value,
+            notes: document.getElementById('examNotes').value,
+            createdAt: editingExamId ? examinations.find(e => e.id === editingExamId)?.createdAt : new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        
+        if (editingExamId) {
+            const index = examinations.findIndex(e => e.id === editingExamId);
+            if (index !== -1) {
+                examinations[index] = exam;
             }
-            
-            const tbody = document.getElementById('examsTableBody');
-            tbody.innerHTML = '';
-            
-            if (filteredExams.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                            <i class="fas fa-stethoscope fa-3x" style="margin-bottom: 15px;"></i>
-                            <h4>هیچ معاینه‌ای یافت نشد</h4>
-                        </td>
-                    </tr>
-                `;
-                return;
+        } else {
+            examinations.push(exam);
+        }
+        
+        await saveAllData();
+        loadExaminations();
+        resetExamForm();
+        
+        showAlert('success', editingExamId 
+            ? 'معاینه ویرایش شد.'
+            : 'معاینه جدید ثبت شد.');
+        
+        editingExamId = null;
+    }
+
+    function loadExaminations() {
+        const filterStatus = document.getElementById('filterStatus').value;
+        const filterDate = document.getElementById('filterDate').value;
+        
+        let filteredExams = examinations;
+        
+        if (filterStatus !== 'همه') {
+            filteredExams = filteredExams.filter(e => e.status === filterStatus);
+        }
+        
+        if (filterDate) {
+            filteredExams = filteredExams.filter(e => e.date === filterDate);
+        }
+        
+        const tbody = document.getElementById('examsTableBody');
+        tbody.innerHTML = '';
+        
+        if (filteredExams.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        <i class="fas fa-stethoscope fa-3x" style="margin-bottom: 15px;"></i>
+                        <h4>هیچ معاینه‌ای یافت نشد</h4>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        filteredExams.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .forEach(exam => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${exam.patientCode}</td>
+                <td>${exam.patientName}</td>
+                <td>${exam.type}</td>
+                <td>${exam.doctor || '---'}</td>
+                <td><span class="price-tag">${exam.price.toLocaleString()} ${settings.currency || 'افغانی'}</span></td>
+                <td><span class="badge ${getStatusBadgeClass(exam.status)}">${exam.status}</span></td>
+                <td>
+                    <div class="exam-actions">
+                        <button class="btn btn-primary btn-sm" onclick="viewExam(${exam.id})" title="مشاهده">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn btn-warning btn-sm" onclick="editExam(${exam.id})" title="ویرایش">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-success btn-sm" onclick="completeExam(${exam.id})" ${exam.status === 'انجام شده' || exam.status === 'تایید شده' ? 'disabled' : ''} title="تکمیل">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button class="btn btn-info btn-sm" onclick="printExamResult(${exam.id})" title="چاپ">
+                            <i class="fas fa-print"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteExam(${exam.id})" title="حذف">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    async function completeExam(id) {
+        const exam = examinations.find(e => e.id === id);
+        if (!exam) return;
+        
+        exam.status = 'انجام شده';
+        exam.updatedAt = new Date().toISOString();
+        
+        await saveAllData();
+        loadExaminations();
+        
+        showAlert('success', 'وضعیت معاینه به "انجام شده" تغییر یافت.');
+    }
+
+    function refreshExams() {
+        loadExaminations();
+        showAlert('success', 'لیست معاینات به روز شد.');
+    }
+
+    function resetExamForm() {
+        document.getElementById('examinationForm').reset();
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('examDate').value = today;
+        editingExamId = null;
+        document.getElementById('patientId').value = '';
+    }
+
+    function editExam(id) {
+        const exam = examinations.find(e => e.id === id);
+        if (!exam) return;
+        
+        editingExamId = id;
+        
+        document.getElementById('patientId').value = exam.patientId;
+        document.getElementById('examDate').value = exam.date;
+        document.getElementById('examType').value = exam.type;
+        document.getElementById('doctor').value = exam.doctor || '';
+        document.getElementById('price').value = exam.price;
+        document.getElementById('paymentStatus').value = exam.paymentStatus;
+        document.getElementById('examStatus').value = exam.status;
+        document.getElementById('examNotes').value = exam.notes || '';
+        
+        showTab('examinations');
+        document.getElementById('examinationForm').scrollIntoView({ behavior: 'smooth' });
+        
+        showAlert('info', 'در حال ویرایش معاینه. پس از تغییرات، دکمه "ذخیره معاینه" را بزنید.');
+    }
+
+    async function deleteExam(id) {
+        Swal.fire({
+            title: 'حذف معاینه',
+            text: 'آیا از حذف این معاینه مطمئن هستید؟',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'بله، حذف کن',
+            cancelButtonText: 'لغو',
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#6b7280'
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                examinations = examinations.filter(e => e.id !== id);
+                await saveAllData();
+                loadExaminations();
+                showAlert('success', 'معاینه حذف شد.');
             }
+        });
+    }
+
+    function viewExam(id) {
+        const exam = examinations.find(e => e.id === id);
+        if (!exam) return;
+        
+        const modalBody = document.getElementById('examModalBody');
+        modalBody.innerHTML = `
+            <h4>${exam.type} - ${exam.patientName}</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px;">
+                <div>
+                    <p><strong>کد بیمار:</strong> ${exam.patientCode}</p>
+                    <p><strong>تاریخ معاینه:</strong> ${exam.date}</p>
+                    <p><strong>پزشک معالج:</strong> ${exam.doctor || '---'}</p>
+                    <p><strong>هزینه:</strong> ${exam.price.toLocaleString()} ${settings.currency || 'افغانی'}</p>
+                </div>
+                <div>
+                    <p><strong>وضعیت پرداخت:</strong> ${exam.paymentStatus}</p>
+                    <p><strong>وضعیت معاینه:</strong> <span class="badge ${getStatusBadgeClass(exam.status)}">${exam.status}</span></p>
+                    <p><strong>تاریخ ثبت:</strong> ${formatDate(exam.createdAt)}</p>
+                    <p><strong>آخرین ویرایش:</strong> ${formatDate(exam.updatedAt)}</p>
+                </div>
+            </div>
+            <p><strong>توضیحات:</strong></p>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-right: 3px solid var(--primary-color);">
+                ${exam.notes || '---'}
+            </div>
             
-            filteredExams.forEach(exam => {
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn btn-success" onclick="printExamResult(${exam.id})">
+                    <i class="fas fa-print"></i> چاپ نتیجه
+                </button>
+                <button class="btn btn-primary" onclick="editExam(${exam.id}); closeModal('examModal')">
+                    <i class="fas fa-edit"></i> ویرایش
+                </button>
+                <button class="btn btn-warning" onclick="completeExam(${exam.id}); closeModal('examModal')" ${exam.status === 'انجام شده' || exam.status === 'تایید شده' ? 'disabled' : ''}>
+                    <i class="fas fa-check"></i> تکمیل معاینه
+                </button>
+            </div>
+        `;
+        
+        document.getElementById('examModal').style.display = 'flex';
+    }
+
+    // ==================== Dashboard Functions ====================
+    function updateDashboard() {
+        const today = new Date().toISOString().split('T')[0];
+        const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+            .toISOString().split('T')[0];
+        
+        // محاسبه آمار
+        const todayPatients = examinations
+            .filter(e => e.date === today)
+            .map(e => e.patientId)
+            .filter((value, index, self) => self.indexOf(value) === index).length;
+        
+        const todayIncome = examinations
+            .filter(e => e.date === today)
+            .reduce((sum, e) => sum + e.price, 0);
+        
+        const pendingExams = examinations
+            .filter(e => e.status === 'در انتظار').length;
+        
+        const monthlyIncome = examinations
+            .filter(e => e.date >= firstDayOfMonth)
+            .reduce((sum, e) => sum + e.price, 0);
+        
+        // به‌روزرسانی نمایش
+        document.getElementById('totalPatients').textContent = todayPatients;
+        document.getElementById('dailyIncome').textContent = todayIncome.toLocaleString();
+        document.getElementById('pendingExams').textContent = pendingExams;
+        document.getElementById('monthlyIncome').textContent = monthlyIncome.toLocaleString();
+        
+        // آخرین معاینات
+        updateRecentExams();
+        
+        // نمودار هفتگی
+        updateWeeklyChart();
+        
+        // تاریخچه ورود
+        updateLoginHistory();
+    }
+
+    function updateRecentExams() {
+        const tbody = document.getElementById('recentExamsBody');
+        tbody.innerHTML = '';
+        
+        const recentExams = examinations
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .slice(0, 5);
+        
+        if (recentExams.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        هیچ معاینه‌ای ثبت نشده است
+                    </td>
+                </tr>
+            `;
+        } else {
+            recentExams.forEach(exam => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td>${exam.patientCode}</td>
                     <td>${exam.patientName}</td>
                     <td>${exam.type}</td>
                     <td>${exam.doctor || '---'}</td>
-                    <td><span class="price-tag">${exam.price.toLocaleString()} افغانی</span></td>
+                    <td>${exam.price.toLocaleString()} ${settings.currency || 'افغانی'}</td>
                     <td><span class="badge ${getStatusBadgeClass(exam.status)}">${exam.status}</span></td>
                     <td>
-                        <div class="exam-actions">
-                            <button class="btn btn-primary btn-sm" onclick="viewExam(${exam.id})" title="مشاهده">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button class="btn btn-warning btn-sm" onclick="editExam(${exam.id})" title="ویرایش">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn btn-success btn-sm" onclick="completeExam(${exam.id})" ${exam.status === 'انجام شده' ? 'disabled' : ''} title="تکمیل">
-                                <i class="fas fa-check"></i>
-                            </button>
-                            <button class="btn btn-info btn-sm" onclick="printExamResult(${exam.id})" title="چاپ">
-                                <i class="fas fa-print"></i>
-                            </button>
-                            <button class="btn btn-danger btn-sm" onclick="deleteExam(${exam.id})" title="حذف">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
+                        <button class="btn btn-primary btn-sm" onclick="viewExam(${exam.id})">
+                            <i class="fas fa-eye"></i>
+                        </button>
                     </td>
                 `;
                 tbody.appendChild(row);
             });
         }
+    }
 
-        async function completeExam(id) {
-            const exam = examinations.find(e => e.id === id);
-            if (!exam) return;
-            
-            exam.status = 'انجام شده';
-            exam.updatedAt = new Date().toISOString();
-            
-            await saveAllData();
-            
-            if (GITHUB_CONFIG.token) {
-                await saveToGitHub('examinations', examinations);
-            }
-            
-            loadExaminations();
-            
-            showAlert('success', 'وضعیت معاینه به انجام شده تغییر یافت.');
+    function updateWeeklyChart() {
+        const ctx = document.getElementById('weeklyChart').getContext('2d');
+        
+        if (weeklyChart) {
+            weeklyChart.destroy();
         }
-
-        function refreshExams() {
-            loadExaminations();
-            showAlert('success', 'لیست معاینات تازه شد.');
-        }
-
-        function resetExamForm() {
-            document.getElementById('examinationForm').reset();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('examDate').value = today;
-            editingExamId = null;
-            document.getElementById('patientId').value = '';
-        }
-
-        function editExam(id) {
-            const exam = examinations.find(e => e.id === id);
-            if (!exam) return;
+        
+        const labels = [];
+        const patientsData = [];
+        const incomeData = [];
+        
+        // محاسبه آمار ۷ روز گذشته
+        for (let i = 6; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateStr = date.toISOString().split('T')[0];
             
-            editingExamId = id;
+            const dayNames = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+            const day = dayNames[date.getDay()];
+            labels.push(day);
             
-            document.getElementById('patientId').value = exam.patientId;
-            document.getElementById('examDate').value = exam.date;
-            document.getElementById('examType').value = exam.type;
-            document.getElementById('doctor').value = exam.doctor || '';
-            document.getElementById('price').value = exam.price;
-            document.getElementById('paymentStatus').value = exam.paymentStatus;
-            document.getElementById('examStatus').value = exam.status;
-            document.getElementById('examNotes').value = exam.notes || '';
-            
-            showTab('examinations');
-            document.getElementById('examinationForm').scrollIntoView({ behavior: 'smooth' });
-        }
-
-        async function deleteExam(id) {
-            if (!confirm('آیا از حذف این معاینه مطمئن هستید؟')) return;
-            
-            examinations = examinations.filter(e => e.id !== id);
-            await saveAllData();
-            
-            if (GITHUB_CONFIG.token) {
-                await saveToGitHub('examinations', examinations);
-            }
-            
-            loadExaminations();
-            
-            showAlert('success', 'معاینه حذف شد.');
-        }
-
-        function viewExam(id) {
-            const exam = examinations.find(e => e.id === id);
-            if (!exam) return;
-            
-            const modalBody = document.getElementById('examModalBody');
-            modalBody.innerHTML = `
-                <h4>${exam.type} - ${exam.patientName}</h4>
-                <p><strong>کد بیمار:</strong> ${exam.patientCode}</p>
-                <p><strong>تاریخ معاینه:</strong> ${exam.date}</p>
-                <p><strong>پزشک معالج:</strong> ${exam.doctor || '---'}</p>
-                <p><strong>هزینه:</strong> ${exam.price.toLocaleString()} افغانی</p>
-                <p><strong>وضعیت پرداخت:</strong> ${exam.paymentStatus}</p>
-                <p><strong>وضعیت معاینه:</strong> <span class="badge ${getStatusBadgeClass(exam.status)}">${exam.status}</span></p>
-                <p><strong>توضیحات:</strong></p>
-                <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0;">
-                    ${exam.notes || '---'}
-                </div>
-                <p><strong>تاریخ ثبت:</strong> ${formatDate(exam.createdAt)}</p>
-                
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button class="btn btn-success" onclick="printExamResult(${exam.id})">
-                        <i class="fas fa-print"></i> چاپ نتیجه
-                    </button>
-                    <button class="btn btn-primary" onclick="editExam(${exam.id}); closeModal('examModal')">
-                        <i class="fas fa-edit"></i> ویرایش
-                    </button>
-                </div>
-            `;
-            
-            document.getElementById('examModal').style.display = 'flex';
-        }
-
-        // ==================== Dashboard ====================
-        function updateDashboard() {
-            const today = new Date().toISOString().split('T')[0];
-            const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-                .toISOString().split('T')[0];
-            
-            const todayPatients = examinations
-                .filter(e => e.date === today)
+            const dayPatients = examinations
+                .filter(e => e.date === dateStr)
                 .map(e => e.patientId)
                 .filter((value, index, self) => self.indexOf(value) === index).length;
             
-            const todayIncome = examinations
-                .filter(e => e.date === today)
+            const dayIncome = examinations
+                .filter(e => e.date === dateStr)
                 .reduce((sum, e) => sum + e.price, 0);
             
-            const pendingExams = examinations
-                .filter(e => e.status === 'در انتظار').length;
-            
-            const monthlyIncome = examinations
-                .filter(e => e.date >= firstDayOfMonth)
-                .reduce((sum, e) => sum + e.price, 0);
-            
-            document.getElementById('totalPatients').textContent = todayPatients;
-            document.getElementById('dailyIncome').textContent = todayIncome.toLocaleString();
-            document.getElementById('pendingExams').textContent = pendingExams;
-            document.getElementById('monthlyIncome').textContent = monthlyIncome.toLocaleString();
-            
-            const tbody = document.getElementById('recentExamsBody');
-            tbody.innerHTML = '';
-            
-            const recentExams = examinations
-                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-                .slice(0, 5);
-            
-            if (recentExams.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="6" style="text-align: center; padding: 20px; color: var(--text-secondary);">
-                            هیچ معاینه‌ای ثبت نشده است
-                        </td>
-                    </tr>
-                `;
-            } else {
-                recentExams.forEach(exam => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${exam.patientName}</td>
-                        <td>${exam.type}</td>
-                        <td>${exam.doctor || '---'}</td>
-                        <td>${exam.price.toLocaleString()} افغانی</td>
-                        <td><span class="badge ${getStatusBadgeClass(exam.status)}">${exam.status}</span></td>
-                        <td>
-                            <button class="btn btn-primary btn-sm" onclick="viewExam(${exam.id})">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                        </td>
-                    `;
-                    tbody.appendChild(row);
-                });
-            }
-            
-            updateWeeklyChart();
+            patientsData.push(dayPatients);
+            incomeData.push(dayIncome);
         }
-
-        function updateWeeklyChart() {
-            const ctx = document.getElementById('weeklyChart').getContext('2d');
-            
-            const labels = [];
-            const patientsData = [];
-            const incomeData = [];
-            
-            for (let i = 6; i >= 0; i--) {
-                const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-                const dateStr = date.toISOString().split('T')[0];
-                
-                const dayNames = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
-                const day = dayNames[date.getDay()];
-                labels.push(day);
-                
-                const dayPatients = examinations
-                    .filter(e => e.date === dateStr)
-                    .map(e => e.patientId)
-                    .filter((value, index, self) => self.indexOf(value) === index).length;
-                
-                const dayIncome = examinations
-                    .filter(e => e.date === dateStr)
-                    .reduce((sum, e) => sum + e.price, 0);
-                
-                patientsData.push(dayPatients);
-                incomeData.push(dayIncome);
-            }
-            
-            if (weeklyChart) {
-                weeklyChart.destroy();
-            }
-            
-            weeklyChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'تعداد بیماران',
-                            data: patientsData,
-                            backgroundColor: '#1a73e8',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'درآمد (افغانی)',
-                            data: incomeData,
-                            backgroundColor: '#34a853',
-                            type: 'line',
-                            yAxisID: 'y1',
-                            tension: 0.4
+        
+        weeklyChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'تعداد بیماران',
+                        data: patientsData,
+                        backgroundColor: '#6d28d9',
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: `درآمد (${settings.currency || 'افغانی'})`,
+                        data: incomeData,
+                        backgroundColor: '#f59e0b',
+                        type: 'line',
+                        yAxisID: 'y1',
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'تعداد بیماران'
                         }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        },
-                        y1: {
-                            beginAtZero: true,
-                            position: 'right'
+                    },
+                    y1: {
+                        beginAtZero: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: `درآمد (${settings.currency || 'افغانی'})`
                         }
                     }
-                }
-            });
-        }
-
-        function updateLoginHistory() {
-            const tbody = document.getElementById('loginHistoryBody');
-            tbody.innerHTML = '';
-            
-            const recentLogins = [...loginHistory].reverse().slice(0, 10);
-            
-            if (recentLogins.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="4" style="text-align: center; padding: 20px; color: var(--text-secondary);">
-                            هیچ تاریخچه‌ای وجود ندارد
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            recentLogins.forEach(entry => {
-                const row = document.createElement('tr');
-                const date = new Date(entry.timestamp);
-                const statusClass = entry.status === 'موفق' ? 'badge-success' : 
-                                  entry.status === 'ناموفق' ? 'badge-danger' : 'badge-warning';
-                
-                row.innerHTML = `
-                    <td>${formatDateTime(entry.timestamp)}</td>
-                    <td>${entry.user}</td>
-                    <td><span class="badge ${statusClass}">${entry.status}</span></td>
-                    <td>${entry.ip}</td>
-                `;
-                tbody.appendChild(row);
-            });
-        }
-
-        // ==================== Helper Functions ====================
-        function formatDateTime(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleString('fa-IR');
-        }
-
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('fa-IR');
-        }
-
-        function getStatusBadgeClass(status) {
-            switch(status) {
-                case 'انجام شده':
-                case 'تایید شده':
-                case 'پرداخت شده':
-                    return 'badge-success';
-                case 'در انتظار':
-                    return 'badge-warning';
-                case 'لغو شده':
-                    return 'badge-danger';
-                default:
-                    return '';
-            }
-        }
-
-        function showLoading() {
-            document.getElementById('loading').classList.add('active');
-        }
-
-        function hideLoading() {
-            document.getElementById('loading').classList.remove('active');
-        }
-
-        function showAlert(type, message) {
-            const alertDiv = type === 'success' 
-                ? document.getElementById('alertSuccess')
-                : document.getElementById('alertError');
-            
-            alertDiv.querySelector('.text-label').textContent = message;
-            alertDiv.style.display = 'flex';
-            
-            setTimeout(() => {
-                alertDiv.style.display = 'none';
-            }, 3000);
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-
-        // ==================== Initialization ====================
-        document.addEventListener('DOMContentLoaded', function() {
-            initLoginSystem();
-            
-            setInterval(updateDateTime, 1000);
-            
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.addEventListener('click', function() {
-                    const tabName = this.getAttribute('data-tab');
-                    showTab(tabName);
-                });
-            });
-            
-            document.querySelectorAll('.action-card[data-tab]').forEach(card => {
-                card.addEventListener('click', function() {
-                    const tabName = this.getAttribute('data-tab');
-                    showTab(tabName);
-                });
-            });
-            
-            const searchInput = document.getElementById('searchPatient');
-            if (searchInput) {
-                searchInput.addEventListener('input', function() {
-                    const searchTerm = this.value.toLowerCase();
-                    const rows = document.querySelectorAll('#patientsTableBody tr');
-                    
-                    rows.forEach(row => {
-                        const text = row.textContent.toLowerCase();
-                        row.style.display = text.includes(searchTerm) ? '' : 'none';
-                    });
-                });
-            }
-            
-            const filterStatus = document.getElementById('filterStatus');
-            if (filterStatus) {
-                filterStatus.addEventListener('change', loadExaminations);
-            }
-            
-            const filterDate = document.getElementById('filterDate');
-            if (filterDate) {
-                filterDate.addEventListener('change', loadExaminations);
-            }
-            
-            const today = new Date().toISOString().split('T')[0];
-            const examDateInput = document.getElementById('examDate');
-            if (examDateInput) {
-                examDateInput.value = today;
-            }
-            
-            const birthDateInput = document.getElementById('birthDate');
-            if (birthDateInput) {
-                birthDateInput.value = '1990-01-01';
-            }
-            
-            setupAutoSync();
-            
-            const savedToken = localStorage.getItem('github_token');
-            const savedUsername = localStorage.getItem('github_username');
-            
-            if (savedToken && savedUsername) {
-                document.getElementById('githubToken').value = savedToken;
-                document.getElementById('githubUsername').value = savedUsername;
-                GITHUB_CONFIG.token = savedToken;
-                GITHUB_CONFIG.username = savedUsername;
-                
-                const syncDisplay = document.getElementById('syncStatusDisplay');
-                if (syncDisplay) {
-                    syncDisplay.innerHTML = getSyncStatusText();
                 }
             }
         });
+    }
 
-        // ==================== Sample Data ====================
-        function initializeSampleData() {
-            if (patients.length === 0 && examinations.length === 0) {
-                patients = [
-                    {
-                        id: 1,
-                        code: 'P1001',
-                        firstName: 'احمد',
-                        lastName: 'احمدی',
-                        fatherName: 'کریم',
-                        nationalId: '123456789',
-                        birthDate: '1980-01-15',
-                        gender: 'مرد',
-                        phone: '0799000001',
-                        province: 'هرات',
-                        district: 'مرکز',
-                        address: 'هرات، خیابان اصلی',
-                        notes: 'مراجع عادی',
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString()
-                    },
-                    {
-                        id: 2,
-                        code: 'P1002',
-                        firstName: 'سمیه',
-                        lastName: 'محمدی',
-                        fatherName: 'رحیم',
-                        nationalId: '987654321',
-                        birthDate: '1990-05-20',
-                        gender: 'زن',
-                        phone: '0799000002',
-                        province: 'غور',
-                        district: 'مرکز',
-                        address: 'غور، شهر مرکزی',
-                        notes: 'بیمار دیابتی',
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString()
-                    }
-                ];
-                
-                const today = new Date().toISOString().split('T')[0];
-                examinations = [
-                    {
-                        id: 1,
-                        patientId: 1,
-                        patientName: 'احمد احمدی',
-                        patientCode: 'P1001',
-                        date: today,
-                        type: 'خون',
-                        doctor: 'دکتر کریمی',
-                        price: 500,
-                        paymentStatus: 'پرداخت شده',
-                        status: 'انجام شده',
-                        notes: 'نتایج نرمال',
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString()
-                    },
-                    {
-                        id: 2,
-                        patientId: 2,
-                        patientName: 'سمیه محمدی',
-                        patientCode: 'P1002',
-                        date: today,
-                        type: 'ادرار',
-                        doctor: 'دکتر احمدی',
-                        price: 300,
-                        paymentStatus: 'در انتظار',
-                        status: 'در انتظار',
-                        notes: 'در حال انجام',
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString()
-                    }
-                ];
-                
-                saveAllData();
-                loadPatientsTable();
-                loadPatientsSelect();
-                loadExaminations();
-                updateDashboard();
-                
-                showAlert('success', 'داده‌های نمونه بارگذاری شدند.');
-            }
+    function updateLoginHistory() {
+        const tbody = document.getElementById('loginHistoryBody');
+        tbody.innerHTML = '';
+        
+        const recentLogins = [...loginHistory]
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .slice(0, 10);
+        
+        if (recentLogins.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        هیچ تاریخچه‌ای وجود ندارد
+                    </td>
+                </tr>
+            `;
+            return;
         }
+        
+        recentLogins.forEach(entry => {
+            const row = document.createElement('tr');
+            const statusClass = entry.status === 'موفق' ? 'badge-success' : 
+                              entry.status === 'ناموفق' ? 'badge-danger' : 
+                              entry.status === 'خروج' ? 'badge-warning' : 'badge-info';
+            
+            row.innerHTML = `
+                <td>${formatDateTime(entry.timestamp)}</td>
+                <td>${entry.user}</td>
+                <td><span class="badge ${statusClass}">${entry.status}</span></td>
+                <td>${entry.ip}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
 
-        // ==================== Additional Functions ====================
-        function printExamResult(id) {
-            const exam = examinations.find(e => e.id === id);
-            if (!exam) return;
+    // ==================== Financial Functions ====================
+    function updateFinancialData() {
+        const today = new Date().toISOString().split('T')[0];
+        const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+            .toISOString().split('T')[0];
+        
+        // محاسبه آمار مالی
+        const totalIncome = examinations.reduce((sum, e) => sum + e.price, 0);
+        const todayIncome = examinations
+            .filter(e => e.date === today)
+            .reduce((sum, e) => sum + e.price, 0);
+        const pendingPayments = examinations
+            .filter(e => e.paymentStatus === 'در انتظار')
+            .reduce((sum, e) => sum + e.price, 0);
+        
+        // به‌روزرسانی نمایش
+        document.getElementById('totalIncome').textContent = totalIncome.toLocaleString();
+        document.getElementById('todayIncome').textContent = todayIncome.toLocaleString();
+        document.getElementById('pendingPayments').textContent = pendingPayments.toLocaleString();
+        
+        // به‌روزرسانی جدول مالی
+        updateFinancialTable();
+        
+        // نمودار درآمد ماهانه
+        updateIncomeChart();
+    }
+
+    function updateFinancialTable() {
+        const filter = document.getElementById('financialFilter').value;
+        let filteredExams = examinations;
+        
+        if (filter === 'امروز') {
+            const today = new Date().toISOString().split('T')[0];
+            filteredExams = examinations.filter(e => e.date === today);
+        } else if (filter === 'هفته') {
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            const weekAgoStr = weekAgo.toISOString().split('T')[0];
+            filteredExams = examinations.filter(e => e.date >= weekAgoStr);
+        } else if (filter === 'ماه') {
+            const monthAgo = new Date();
+            monthAgo.setMonth(monthAgo.getMonth() - 1);
+            const monthAgoStr = monthAgo.toISOString().split('T')[0];
+            filteredExams = examinations.filter(e => e.date >= monthAgoStr);
+        }
+        
+        const tbody = document.getElementById('financialTableBody');
+        tbody.innerHTML = '';
+        
+        filteredExams.sort((a, b) => new Date(b.date) - new Date(a.date))
+            .forEach(exam => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${exam.date}</td>
+                <td>${exam.patientName}</td>
+                <td>${exam.type}</td>
+                <td>${exam.doctor || 'بدون پزشک'}</td>
+                <td>${exam.price.toLocaleString()}</td>
+                <td><span class="badge ${getStatusBadgeClass(exam.paymentStatus)}">${exam.paymentStatus}</span></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function updateIncomeChart() {
+        const ctx = document.getElementById('incomeChart').getContext('2d');
+        
+        if (incomeChart) {
+            incomeChart.destroy();
+        }
+        
+        const months = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 
+                       'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+        const currentMonth = new Date().getMonth();
+        const labels = months.slice(Math.max(0, currentMonth - 5), currentMonth + 1);
+        
+        const incomeData = Array(6).fill(0);
+        const currentYear = new Date().getFullYear();
+        
+        examinations.forEach(exam => {
+            const examDate = new Date(exam.date);
+            const examMonth = examDate.getMonth();
+            const examYear = examDate.getFullYear();
             
-            const printWindow = window.open('', '_blank');
+            if (examYear === currentYear && examMonth >= currentMonth - 5 && examMonth <= currentMonth) {
+                const index = examMonth - (currentMonth - 5);
+                if (index >= 0 && index < 6) {
+                    incomeData[index] += exam.price;
+                }
+            }
+        });
+        
+        incomeChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: `درآمد ماهانه (${settings.currency || 'افغانی'})`,
+                    data: incomeData,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: `درآمد (${settings.currency || 'افغانی'})`
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ==================== Helper Functions ====================
+    function formatDateTime(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleString('fa-IR');
+    }
+
+    function formatDate(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('fa-IR');
+    }
+
+    function getStatusBadgeClass(status) {
+        switch(status) {
+            case 'انجام شده':
+            case 'تایید شده':
+            case 'پرداخت شده':
+                return 'badge-success';
+            case 'در انتظار':
+                return 'badge-warning';
+            case 'لغو شده':
+                return 'badge-danger';
+            default:
+                return 'badge-info';
+        }
+    }
+
+    function showLoading() {
+        document.getElementById('loading').classList.add('active');
+    }
+
+    function hideLoading() {
+        document.getElementById('loading').classList.remove('active');
+    }
+
+    function showAlert(type, message) {
+        const alertDiv = type === 'success' 
+            ? document.getElementById('alertSuccess')
+            : document.getElementById('alertError');
+        
+        alertDiv.querySelector('.text-label').textContent = message;
+        alertDiv.style.display = 'flex';
+        
+        setTimeout(() => {
+            alertDiv.style.display = 'none';
+        }, 3000);
+    }
+
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+    }
+
+    // ==================== Sample Data ====================
+    function initializeSampleData() {
+        console.log('📝 ایجاد داده‌های نمونه...');
+        
+        if (patients.length === 0) {
+            patients = [
+                {
+                    id: 1,
+                    code: 'P1001',
+                    firstName: 'احمد',
+                    lastName: 'کریمی',
+                    fatherName: 'محمد',
+                    nationalId: '1234567890',
+                    birthDate: '1985-03-15',
+                    gender: 'مرد',
+                    phone: '0799123456',
+                    province: 'هرات',
+                    district: 'مرکز',
+                    address: 'هرات، شهر نو',
+                    notes: 'بیمار دیابتی',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                },
+                {
+                    id: 2,
+                    code: 'P1002',
+                    firstName: 'فاطمه',
+                    lastName: 'محمدی',
+                    fatherName: 'علی',
+                    nationalId: '0987654321',
+                    birthDate: '1990-08-22',
+                    gender: 'زن',
+                    phone: '0799876543',
+                    province: 'کابل',
+                    district: 'شهر کهن',
+                    address: 'کابل، کارته‌سخی',
+                    notes: 'باردار - ماه هفتم',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                }
+            ];
+        }
+        
+        if (examinations.length === 0) {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
             
-            printWindow.document.write(`
-                <html dir="rtl">
-                <head>
-                    <title>نتیجه آزمایش</title>
-                    <style>
-                        body { font-family: 'Vazirmatn', sans-serif; padding: 20px; }
-                        .header { text-align: center; margin-bottom: 30px; }
-                        .info { margin: 30px 0; }
-                        .footer { margin-top: 50px; text-align: center; font-size: 12px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="header">
-                        <h1>${settings.labName || 'سیستم مدیریت لابراتوار'}</h1>
-                        <h2>نتیجه آزمایش</h2>
+            examinations = [
+                {
+                    id: 1,
+                    patientId: 1,
+                    patientName: 'احمد کریمی',
+                    patientCode: 'P1001',
+                    date: today,
+                    type: 'خون',
+                    doctor: 'دکتر رحیمی',
+                    price: 1500,
+                    paymentStatus: 'پرداخت شده',
+                    status: 'انجام شده',
+                    notes: 'نتایج نرمال - قند خون: 95',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                },
+                {
+                    id: 2,
+                    patientId: 2,
+                    patientName: 'فاطمه محمدی',
+                    patientCode: 'P1002',
+                    date: yesterday,
+                    type: 'ادرار',
+                    doctor: 'دکتر احمدی',
+                    price: 800,
+                    paymentStatus: 'در انتظار',
+                    status: 'در انتظار',
+                    notes: 'نمونه گرفته شده - در انتظار نتیجه',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                }
+            ];
+        }
+        
+        saveAllData();
+        console.log('✅ داده‌های نمونه ایجاد شدند');
+        
+        showAlert('success', 'داده‌های نمونه بارگذاری شدند. برای ورود از نام کاربری "admin" و رمز عبور "admin123" استفاده کنید.');
+    }
+
+    // ==================== Additional Functions ====================
+    function printExamResult(id) {
+        const exam = examinations.find(e => e.id === id);
+        if (!exam) return;
+        
+        const patient = patients.find(p => p.id === exam.patientId);
+        if (!patient) return;
+        
+        const printWindow = window.open('', '_blank');
+        
+        printWindow.document.write(`
+            <html dir="rtl">
+            <head>
+                <title>نتیجه آزمایش - ${exam.patientName}</title>
+                <style>
+                    @font-face {
+                        font-family: 'Vazirmatn';
+                        src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+                    }
+                    body { 
+                        font-family: 'Vazirmatn', sans-serif; 
+                        padding: 30px; 
+                        margin: 0;
+                        background: #fff;
+                        color: #333;
+                    }
+                    .header { 
+                        text-align: center; 
+                        margin-bottom: 40px;
+                        padding-bottom: 20px;
+                        border-bottom: 3px solid #6d28d9;
+                    }
+                    .header h1 {
+                        color: #6d28d9;
+                        margin-bottom: 5px;
+                    }
+                    .info { 
+                        margin: 30px 0;
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 20px;
+                    }
+                    .info-section {
+                        background: #f9fafb;
+                        padding: 20px;
+                        border-radius: 8px;
+                        border-right: 4px solid #6d28d9;
+                    }
+                    .results {
+                        margin: 30px 0;
+                        padding: 25px;
+                        background: #f0f9ff;
+                        border-radius: 8px;
+                        border: 2px solid #3b82f6;
+                    }
+                    .footer { 
+                        margin-top: 50px; 
+                        text-align: center; 
+                        font-size: 12px; 
+                        color: #6b7280;
+                        padding-top: 20px;
+                        border-top: 1px solid #e5e7eb;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin: 20px 0;
+                    }
+                    th, td {
+                        padding: 12px 15px;
+                        text-align: right;
+                        border-bottom: 1px solid #e5e7eb;
+                    }
+                    th {
+                        background: #6d28d9;
+                        color: white;
+                    }
+                    .signature {
+                        margin-top: 50px;
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 30px;
+                    }
+                    .sign-box {
+                        text-align: center;
+                        padding-top: 40px;
+                    }
+                    .stamp {
+                        color: #ef4444;
+                        font-weight: bold;
+                        border: 2px solid #ef4444;
+                        padding: 5px 15px;
+                        display: inline-block;
+                        margin-top: 10px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>${settings.labName || 'سیستم مدیریت لابراتوار'}</h1>
+                    <h2>گزارش نتیجه آزمایش</h2>
+                    <p>${settings.labAddress || 'هرات، افغانستان'} - تلفن: ${settings.labPhone || '0797877773'}</p>
+                </div>
+                
+                <div class="info">
+                    <div class="info-section">
+                        <h3>اطلاعات بیمار</h3>
+                        <p><strong>نام کامل:</strong> ${exam.patientName}</p>
+                        <p><strong>کد بیمار:</strong> ${exam.patientCode}</p>
+                        <p><strong>تاریخ تولد:</strong> ${patient.birthDate || '---'}</p>
+                        <p><strong>جنسیت:</strong> ${patient.gender}</p>
+                        <p><strong>شماره تماس:</strong> ${patient.phone}</p>
                     </div>
                     
-                    <div class="info">
-                        <p><strong>نام بیمار:</strong> ${exam.patientName}</p>
-                        <p><strong>کد بیمار:</strong> ${exam.patientCode}</p>
+                    <div class="info-section">
+                        <h3>اطلاعات آزمایش</h3>
                         <p><strong>تاریخ آزمایش:</strong> ${exam.date}</p>
                         <p><strong>نوع آزمایش:</strong> ${exam.type}</p>
                         <p><strong>پزشک معالج:</strong> ${exam.doctor || '---'}</p>
+                        <p><strong>وضعیت:</strong> ${exam.status}</p>
+                        <p><strong>هزینه:</strong> ${exam.price.toLocaleString()} ${settings.currency || 'افغانی'}</p>
                     </div>
+                </div>
+                
+                <div class="results">
+                    <h3>نتایج و توضیحات</h3>
+                    <p>${exam.notes || 'نتایج در حال بررسی می‌باشد.'}</p>
+                </div>
+                
+                <div class="signature">
+                    <div class="sign-box">
+                        <p>_________________________</p>
+                        <p>امضا مسئول آزمایشگاه</p>
+                        <div class="stamp">مهر آزمایشگاه</div>
+                    </div>
+                    <div class="sign-box">
+                        <p>_________________________</p>
+                        <p>امضا پزشک معالج</p>
+                        <p>${exam.doctor || '---'}</p>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <p>${settings.labName || 'سیستم مدیریت لابراتوار'}</p>
+                    <p>${settings.labAddress || 'هرات، افغانستان'} - تلفن: ${settings.labPhone || '0797877773'}</p>
+                    <p>تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')} - ساعت: ${new Date().toLocaleTimeString('fa-IR')}</p>
+                    <p style="color: #10b981;">این سند به صورت الکترونیکی صادر شده و نیاز به مهر و امضا دارد.</p>
+                </div>
+            </body>
+            </html>
+        `);
+        
+        printWindow.document.close();
+        setTimeout(() => {
+            printWindow.print();
+            printWindow.close();
+        }, 500);
+    }
+
+    function printDailyReport() {
+        const today = new Date().toISOString().split('T')[0];
+        const todayExams = examinations.filter(e => e.date === today);
+        
+        if (todayExams.length === 0) {
+            showAlert('warning', 'هیچ معاینه‌ای برای امروز ثبت نشده است.');
+            return;
+        }
+        
+        const printWindow = window.open('', '_blank');
+        const totalIncome = todayExams.reduce((sum, e) => sum + e.price, 0);
+        
+        printWindow.document.write(`
+            <html dir="rtl">
+            <head>
+                <title>گزارش روزانه - ${today}</title>
+                <style>
+                    body { font-family: 'Vazirmatn', sans-serif; padding: 20px; }
+                    .header { text-align: center; margin-bottom: 30px; }
+                    .summary { margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                    th, td { padding: 10px; text-align: right; border-bottom: 1px solid #ddd; }
+                    th { background: #6d28d9; color: white; }
+                    .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #666; }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>${settings.labName || 'سیستم مدیریت لابراتوار'}</h1>
+                    <h2>گزارش روزانه</h2>
+                    <p>تاریخ: ${today}</p>
+                </div>
+                
+                <div class="summary">
+                    <p><strong>تعداد معاینات:</strong> ${todayExams.length}</p>
+                    <p><strong>درآمد کل:</strong> ${totalIncome.toLocaleString()} ${settings.currency || 'افغانی'}</p>
+                </div>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>بیمار</th>
+                            <th>نوع آزمایش</th>
+                            <th>پزشک</th>
+                            <th>هزینه</th>
+                            <th>وضعیت</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${todayExams.map(exam => `
+                            <tr>
+                                <td>${exam.patientName}</td>
+                                <td>${exam.type}</td>
+                                <td>${exam.doctor || '---'}</td>
+                                <td>${exam.price.toLocaleString()}</td>
+                                <td>${exam.status}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                    <p>${settings.labName || ''} - ${settings.labPhone || ''}</p>
+                    <p>تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')}</p>
+                </div>
+            </body>
+            </html>
+        `);
+        
+        printWindow.document.close();
+        setTimeout(() => {
+            printWindow.print();
+            printWindow.close();
+        }, 500);
+    }
+
+    function exportAllData() {
+        showLoading();
+        
+        try {
+            let csvContent = "data:text/csv;charset=utf-8,";
+            
+            // بخش بیماران
+            csvContent += "===== بیماران =====\n";
+            csvContent += "کد,نام,تخلص,نام پدر,تذکره,تاریخ تولد,جنسیت,شماره تماس,ولایت,ناحیه,آدرس,یادداشت,تاریخ ثبت\n";
+            
+            patients.forEach(patient => {
+                const row = [
+                    patient.code,
+                    patient.firstName,
+                    patient.lastName,
+                    patient.fatherName || '',
+                    patient.nationalId || '',
+                    patient.birthDate || '',
+                    patient.gender,
+                    patient.phone,
+                    patient.province || '',
+                    patient.district || '',
+                    patient.address || '',
+                    patient.notes || '',
+                    formatDate(patient.createdAt)
+                ].map(field => `"${field}"`).join(',');
+                csvContent += row + "\n";
+            });
+            
+            // بخش معاینات
+            csvContent += "\n===== معاینات =====\n";
+            csvContent += "کد بیمار,نام بیمار,نوع آزمایش,تاریخ,پزشک,هزینه,وضعیت پرداخت,وضعیت معاینه,یادداشت,تاریخ ثبت\n";
+            
+            examinations.forEach(exam => {
+                const row = [
+                    exam.patientCode,
+                    exam.patientName,
+                    exam.type,
+                    exam.date,
+                    exam.doctor || '',
+                    exam.price,
+                    exam.paymentStatus,
+                    exam.status,
+                    exam.notes || '',
+                    formatDate(exam.createdAt)
+                ].map(field => `"${field}"`).join(',');
+                csvContent += row + "\n";
+            });
+            
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `lab_export_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showAlert('success', 'داده‌ها با موفقیت دانلود شدند.');
+            
+        } catch (error) {
+            console.error('Export error:', error);
+            showAlert('error', 'خطا در صادر کردن داده‌ها.');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function backupData() {
+        showLoading();
+        
+        try {
+            const backupData = {
+                patients: patients,
+                examinations: examinations,
+                settings: settings,
+                users: Object.values(users),
+                loginHistory: loginHistory,
+                backupDate: new Date().toISOString(),
+                backupVersion: '1.0',
+                labName: settings.labName || 'سیستم مدیریت لابراتوار'
+            };
+            
+            const dataStr = JSON.stringify(backupData, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            
+            const link = document.createElement('a');
+            link.setAttribute('href', dataUri);
+            link.setAttribute('download', `lab_backup_${new Date().toISOString().split('T')[0]}.json`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showAlert('success', 'پشتیبان‌گیری با موفقیت انجام شد.');
+            
+        } catch (error) {
+            console.error('Backup error:', error);
+            showAlert('error', 'خطا در پشتیبان‌گیری.');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function restoreData() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        
+        input.onchange = function(event) {
+            showLoading();
+            
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const backupData = JSON.parse(e.target.result);
                     
-                    <div class="footer">
-                        <p>${settings.labName || ''} - ${settings.labPhone || ''}</p>
-                        <p>تاریخ چاپ: ${new Date().toLocaleDateString('fa-IR')}</p>
-                    </div>
-                </body>
-                </html>
-            `);
+                    // اعتبارسنجی داده‌های پشتیبان
+                    if (!backupData.backupDate || !backupData.patients || !backupData.examinations) {
+                        throw new Error('فایل پشتیبان نامعتبر است.');
+                    }
+                    
+                    Swal.fire({
+                        title: 'بازیابی داده‌ها',
+                        text: `آیا از بازیابی داده‌های پشتیبان مورخ ${formatDate(backupData.backupDate)} مطمئن هستید؟`,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'بله، بازیابی کن',
+                        cancelButtonText: 'لغو',
+                        confirmButtonColor: '#10b981',
+                        cancelButtonColor: '#6b7280'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            // بازیابی داده‌ها
+                            patients = backupData.patients || [];
+                            examinations = backupData.examinations || [];
+                            settings = backupData.settings || {};
+                            
+                            if (backupData.users) {
+                                users = {};
+                                backupData.users.forEach(user => {
+                                    users[user.username] = user;
+                                });
+                                saveUsers();
+                            }
+                            
+                            if (backupData.loginHistory) {
+                                loginHistory = backupData.loginHistory;
+                            }
+                            
+                            saveAllData();
+                            loadAllData();
+                            
+                            showAlert('success', 'داده‌ها با موفقیت بازیابی شدند.');
+                        }
+                    });
+                    
+                } catch (error) {
+                    console.error('Restore error:', error);
+                    showAlert('error', 'خطا در بازیابی داده‌ها. فایل نامعتبر است.');
+                } finally {
+                    hideLoading();
+                }
+            };
             
-            printWindow.document.close();
-            setTimeout(() => {
-                printWindow.print();
-                printWindow.close();
-            }, 500);
-        }
+            reader.readAsText(file);
+        };
+        
+        input.click();
+    }
 
-        function exportAllData() {
-            showLoading();
+    // ==================== GitHub Functions ====================
+    function getSyncStatusText() {
+        if (!GITHUB_CONFIG.token) {
+            return '<span style="color: var(--warning-color);">❌ توکن تنظیم نشده است</span>';
+        }
+        
+        if (!navigator.onLine) {
+            return '<span style="color: var(--warning-color);">📴 حالت آفلاین</span>';
+        }
+        
+        if (syncStatus.lastSync) {
+            const lastSyncDate = new Date(syncStatus.lastSync);
+            const now = new Date();
+            const diffMinutes = Math.floor((now - lastSyncDate) / (1000 * 60));
             
-            try {
-                let csvContent = "data:text/csv;charset=utf-8,";
-                csvContent += "===== Patients =====\n";
-                csvContent += "Code,Name,National ID,Phone,Gender,Birth Date,Address,Registration Date\n";
-                
-                patients.forEach(patient => {
-                    const row = [
-                        patient.code,
-                        `${patient.firstName} ${patient.lastName}`,
-                        patient.nationalId,
-                        patient.phone,
-                        patient.gender,
-                        patient.birthDate,
-                        patient.address,
-                        formatDate(patient.createdAt)
-                    ].join(',');
-                    csvContent += row + "\n";
-                });
-                
-                csvContent += "\n===== Examinations =====\n";
-                csvContent += "Patient,Patient Code,Exam Type,Date,Doctor,Price,Payment Status,Exam Status,Notes\n";
-                
-                examinations.forEach(exam => {
-                    const row = [
-                        exam.patientName,
-                        exam.patientCode,
-                        exam.type,
-                        exam.date,
-                        exam.doctor,
-                        exam.price,
-                        exam.paymentStatus,
-                        exam.status,
-                        exam.notes.replace(/,/g, ';')
-                    ].join(',');
-                    csvContent += row + "\n";
-                });
-                
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", `lab_data_${new Date().toISOString().split('T')[0]}.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                
-                showAlert('success', 'داده‌ها با موفقیت دانلود شدند.');
-                
-            } catch (error) {
-                console.error('Export error:', error);
-                showAlert('error', 'خطا در صادر کردن داده‌ها.');
-            } finally {
-                hideLoading();
+            if (diffMinutes < 5) {
+                return `<span style="color: var(--success-color);">✅ همگام - ${diffMinutes} دقیقه قبل</span>`;
+            } else if (diffMinutes < 60) {
+                return `<span style="color: var(--warning-color);">⚠️ ${diffMinutes} دقیقه از آخرین همگام‌سازی گذشته</span>`;
+            } else {
+                const hours = Math.floor(diffMinutes / 60);
+                return `<span style="color: var(--danger-color);">❌ ${hours} ساعت از آخرین همگام‌سازی گذشته</span>`;
             }
         }
+        
+        return '<span style="color: var(--info-color);">ℹ️ هنوز همگام‌سازی نشده است</span>';
+    }
 
-        function backupData() {
-            showLoading();
-            
-            try {
-                const backupData = {
-                    patients: patients,
-                    examinations: examinations,
-                    settings: settings,
-                    users: users,
-                    loginHistory: loginHistory,
-                    backupDate: new Date().toISOString(),
-                    backupVersion: '1.0'
-                };
+    // ==================== Initialization ====================
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('🚀 سیستم مدیریت لابراتوار در حال راه اندازی...');
+        
+        // راه اندازی سیستم ورود
+        initLoginSystem();
+        
+        // به روز رسانی تاریخ و زمان
+        setInterval(updateDateTime, 1000);
+        updateDateTime();
+        
+        // تنظیم رویدادهای تب‌ها
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabName = this.getAttribute('data-tab');
+                showTab(tabName);
+            });
+        });
+        
+        // تنظیم رویدادهای کارت‌های عملیاتی
+        document.querySelectorAll('.action-card[data-tab]').forEach(card => {
+            card.addEventListener('click', function() {
+                const tabName = this.getAttribute('data-tab');
+                showTab(tabName);
+            });
+        });
+        
+        // تنظیم جستجوی بیماران
+        const searchInput = document.getElementById('searchPatient');
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.toLowerCase();
+                const rows = document.querySelectorAll('#patientsTableBody tr');
                 
-                const dataStr = JSON.stringify(backupData, null, 2);
-                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-                
-                const link = document.createElement('a');
-                link.setAttribute('href', dataUri);
-                link.setAttribute('download', `lab_backup_${new Date().toISOString().split('T')[0]}.json`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                
-                showAlert('success', 'پشتیبان‌گیری با موفقیت انجام شد.');
-                
-            } catch (error) {
-                console.error('Backup error:', error);
-                showAlert('error', 'خطا در پشتیبان‌گیری.');
-            } finally {
-                hideLoading();
-            }
+                rows.forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    row.style.display = text.includes(searchTerm) ? '' : 'none';
+                });
+            });
         }
+        
+        // تنظیم فیلترهای معاینات
+        const filterStatus = document.getElementById('filterStatus');
+        if (filterStatus) {
+            filterStatus.addEventListener('change', loadExaminations);
+        }
+        
+        const filterDate = document.getElementById('filterDate');
+        if (filterDate) {
+            filterDate.addEventListener('change', loadExaminations);
+        }
+        
+        // تنظیم تاریخ امروز برای فرم‌ها
+        const today = new Date().toISOString().split('T')[0];
+        const examDateInput = document.getElementById('examDate');
+        if (examDateInput) {
+            examDateInput.value = today;
+            examDateInput.min = '2000-01-01';
+            examDateInput.max = today;
+        }
+        
+        const birthDateInput = document.getElementById('birthDate');
+        if (birthDateInput) {
+            const maxBirthDate = new Date();
+            maxBirthDate.setFullYear(maxBirthDate.getFullYear() - 5);
+            birthDateInput.max = maxBirthDate.toISOString().split('T')[0];
+            birthDateInput.min = '1900-01-01';
+        }
+        
+        // تنظیم فیلترهای مالی
+        const financialFilter = document.getElementById('financialFilter');
+        if (financialFilter) {
+            financialFilter.addEventListener('change', updateFinancialTable);
+        }
+        
+        console.log('✅ سیستم آماده است');
+    });
     </script>
 </body>
 </html>
